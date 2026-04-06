@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gsa-calc-mcp"
+version = "0.1.0"
+description = "MCP server for the GSA CALC+ Labor Ceiling Rates API. GSA MAS schedule rate benchmarking for IGCEs and price analysis."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "1102tools" }
+]
+keywords = ["mcp", "model-context-protocol", "gsa", "calc", "ceiling-rates", "igce", "pricing", "federal-contracts", "1102"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://1102tools.com"
+Repository = "https://github.com/1102tools/gsa-calc-mcp"
+
+[project.scripts]
+gsa-calc-mcp = "gsa_calc_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gsa_calc_mcp"]
