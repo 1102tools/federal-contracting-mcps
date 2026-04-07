@@ -124,7 +124,7 @@ Once configured, try:
 
 ## Data source
 
-All data is sourced from [USASpending.gov](https://www.usaspending.gov), which aggregates FPDS-NG contract data, FAADC assistance data, and agency DATA Act submissions. FPDS data has a ~1 business day lag.
+All data is sourced from [USASpending.gov](https://www.usaspending.gov), which aggregates FPDS-NG contract data, FAADC assistance data, and agency DATA Act submissions. Data freshness varies by agency: non-DoD contract data is typically available within 5 business days, DoD and USACE procurement data has a 90-day reporting delay in FPDS, and financial assistance data is available within 2 days of submission.
 
 ## License
 
