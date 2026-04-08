@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (2026-04-07)
+
+Contract Awards API support (FPDS replacement).
+
+- 3 new tools: search_contract_awards, lookup_award_by_piid, search_deleted_awards
+- Contract Awards v1 (/contract-awards/v1/search) covers the full FPDS data set
+- Response normalization: empty results use a different JSON wrapper than populated results; all tools return a consistent shape
+- Plain text/HTML error handling: Contract Awards returns non-JSON for certain errors (limit>100, bad date format, invalid API key)
+- Client-side limit validation (max 100) with actionable error messages
+- 15 total tools (was 12)
+
 ## 0.1.0 (2026-04-05)
 
 Initial release.

@@ -1,12 +1,12 @@
 # sam-gov-mcp
 
-MCP server for SAM.gov entity registration, exclusion/debarment, and contract opportunity data.
+MCP server for SAM.gov entity registration, exclusion/debarment, contract opportunity, and contract award data.
 
 Requires a free SAM.gov API key. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
 
 ## What it does
 
-Exposes three SAM.gov REST APIs plus the PSC lookup as 13 MCP tools:
+Exposes four SAM.gov REST APIs plus the PSC lookup as 15 MCP tools:
 
 **Entity Management (v3)**
 - `lookup_entity_by_uei` - Single UEI lookup with configurable response sections
@@ -22,6 +22,11 @@ Exposes three SAM.gov REST APIs plus the PSC lookup as 13 MCP tools:
 **Contract Opportunities (v2)**
 - `search_opportunities` - Search contract opportunities with full working filter set
 - `get_opportunity_description` - Fetch the HTML description by notice ID
+
+**Contract Awards (v1) -- FPDS replacement**
+- `search_contract_awards` - Search contract award records (vendor, agency, NAICS, dates, dollars, set-aside, etc.)
+- `lookup_award_by_piid` - Look up all modifications for a single PIID
+- `search_deleted_awards` - Search deleted award records for audit trails
 
 **PSC Lookup**
 - `lookup_psc_code` - Resolve a PSC code to its full record
@@ -98,6 +103,10 @@ Once configured:
 - "Show me SDVOSB set-aside solicitations for IT services posted this quarter."
 - "Get the full description of notice ID [paste ID] and summarize the SOW."
 - "Search active exclusions where the excluded party name starts with 'acme'."
+- "Search contract awards for Booz Allen Hamilton in fiscal year 2026."
+- "Look up all modifications for PIID W912BV22P0112."
+- "Find all SDVOSB set-aside contract awards signed this year with NAICS 541512."
+- "Show me deleted contract award records for Department of Defense."
 
 ## Design notes
 
@@ -111,6 +120,8 @@ Once configured:
   - Bracket/tilde/exclamation characters are preserved in query strings for multi-value params
 - **Post-filtering for broken parameters.** The Opportunities API silently ignores `deptname` and `subtier` filters. `search_opportunities` exposes an `agency_keyword` parameter that post-filters results by matching `fullParentPathName` substring.
 - **includeSections defaults.** Entity lookups default to `entityRegistration,coreData`. Always include `entityRegistration` alongside any other section or the response has no identification. `repsAndCerts` and `integrityInformation` require explicit tool calls (`get_entity_reps_and_certs`, `get_entity_integrity_info`) because even `includeSections=All` doesn't include them.
+- **Contract Awards response normalization.** The Contract Awards API returns different JSON wrapper shapes for populated vs. empty results. All tools normalize this to a consistent `{"awardSummary": [...], "totalRecords": int}` shape. Error responses are plain text (not JSON), detected and raised as actionable errors.
+- **Contract Awards pagination.** Uses `limit`/`offset` (NOT `page`/`size` like Entity Management). Max limit is 100. Dates must be MM/dd/yyyy format with bracket ranges `[MM/dd/yyyy,MM/dd/yyyy]`.
 - **Composite workflow.** `vendor_responsibility_check` collapses a typical FAR 9.104-1 check (entity registration + exclusion lookup) into one tool call, returning a structured flags list for downstream reasoning.
 
 ## Companion skill

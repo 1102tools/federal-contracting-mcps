@@ -34,6 +34,9 @@ from sam_gov_mcp.server import (
     lookup_psc_code,
     search_psc_free_text,
     vendor_responsibility_check,
+    search_contract_awards,
+    lookup_award_by_piid,
+    search_deleted_awards,
 )
 
 
@@ -474,6 +477,169 @@ async def main() -> int:
             record("opportunities ISO date rejection", "INFO", msg[:100])
     except Exception as e:
         record("opportunities ISO date rejection", "INFO", str(e)[:100])
+
+    # ========== Section 7: Contract Awards (FPDS replacement) ==========
+    await section("7. CONTRACT AWARDS")
+
+    await asyncio.sleep(0.4)
+
+    # 7a: Vendor name search
+    try:
+        r = await search_contract_awards(awardee_name="BOOZ ALLEN", limit=2)
+        total = r.get("totalRecords", 0)
+        has_summary = isinstance(r.get("awardSummary"), list)
+        if total > 0 and has_summary:
+            piid = r["awardSummary"][0].get("contractId", {}).get("piid", "?")
+            record("search_contract_awards vendor name", "PASS",
+                   f"totalRecords={total}, first piid={piid}")
+        else:
+            record("search_contract_awards vendor name", "FAIL",
+                   f"totalRecords={total}, has_summary={has_summary}")
+    except Exception as e:
+        record("search_contract_awards vendor name", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7b: NAICS + date range
+    try:
+        r = await search_contract_awards(
+            naics_code="541512",
+            date_signed="[01/01/2026,03/31/2026]",
+            limit=2,
+        )
+        total = r.get("totalRecords", 0)
+        record("search_contract_awards NAICS+date", "PASS",
+               f"totalRecords={total}")
+    except Exception as e:
+        record("search_contract_awards NAICS+date", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7c: Set-aside + fiscal year
+    try:
+        r = await search_contract_awards(
+            type_of_set_aside_code="SBA",
+            fiscal_year="2026",
+            limit=2,
+        )
+        total = r.get("totalRecords", 0)
+        record("search_contract_awards set-aside+FY", "PASS",
+               f"totalRecords={total}")
+    except Exception as e:
+        record("search_contract_awards set-aside+FY", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7d: Free text search
+    try:
+        r = await search_contract_awards(free_text="cybersecurity", limit=2)
+        total = r.get("totalRecords", 0)
+        record("search_contract_awards free text", "PASS",
+               f"totalRecords={total}")
+    except Exception as e:
+        record("search_contract_awards free text", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7e: PIID lookup (multi-mod contract)
+    try:
+        r = await lookup_award_by_piid("MCC050007CFOA")
+        total = r.get("totalRecords", 0)
+        mods = len(r.get("awardSummary", []))
+        if total > 1:
+            record("lookup_award_by_piid multi-mod", "PASS",
+                   f"totalRecords={total}, mods returned={mods}")
+        elif total == 0:
+            record("lookup_award_by_piid multi-mod", "INFO",
+                   "PIID not found (may have been deleted)")
+        else:
+            record("lookup_award_by_piid multi-mod", "PASS",
+                   f"totalRecords={total}")
+    except Exception as e:
+        record("lookup_award_by_piid", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7f: Empty PIID (should return empty normalized response)
+    try:
+        r = await lookup_award_by_piid("")
+        if r.get("totalRecords") == 0 and r.get("awardSummary") == []:
+            record("lookup_award_by_piid empty", "PASS", "returned empty normalized")
+        else:
+            record("lookup_award_by_piid empty", "FAIL", f"unexpected: {str(r)[:100]}")
+    except Exception as e:
+        record("lookup_award_by_piid empty", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7g: includeSections filter
+    try:
+        r = await search_contract_awards(
+            naics_code="541512",
+            include_sections="contractId",
+            limit=1,
+        )
+        if r.get("awardSummary"):
+            rec = r["awardSummary"][0]
+            has_cid = "contractId" in rec
+            has_core = "coreData" in rec
+            if has_cid and not has_core:
+                record("search_contract_awards includeSections", "PASS",
+                       "contractId only, coreData excluded")
+            else:
+                record("search_contract_awards includeSections", "FAIL",
+                       f"contractId={has_cid}, coreData={has_core}")
+        else:
+            record("search_contract_awards includeSections", "INFO", "no results")
+    except Exception as e:
+        record("search_contract_awards includeSections", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7h: Deleted awards
+    try:
+        r = await search_deleted_awards(limit=2)
+        total = r.get("totalRecords", 0)
+        has_summary = isinstance(r.get("awardSummary"), list)
+        record("search_deleted_awards", "PASS" if total > 0 else "INFO",
+               f"totalRecords={total}, normalized={has_summary}")
+    except Exception as e:
+        record("search_deleted_awards", "FAIL", str(e)[:120])
+
+    await asyncio.sleep(0.4)
+
+    # 7i: Limit cap validation (client-side)
+    try:
+        await search_contract_awards(limit=200)
+        record("contract awards limit cap", "FAIL",
+               "expected ValueError for limit > 100")
+    except ValueError:
+        record("contract awards limit cap", "PASS",
+               "raised ValueError for limit=200")
+    except Exception as e:
+        record("contract awards limit cap", "FAIL",
+               f"wrong exception: {type(e).__name__}")
+
+    await asyncio.sleep(0.4)
+
+    # 7j: Offset pagination
+    try:
+        r1 = await search_contract_awards(naics_code="541512", limit=1, offset=0)
+        await asyncio.sleep(0.3)
+        r2 = await search_contract_awards(naics_code="541512", limit=1, offset=1)
+        piid1 = (r1.get("awardSummary") or [{}])[0].get("contractId", {}).get("piid")
+        piid2 = (r2.get("awardSummary") or [{}])[0].get("contractId", {}).get("piid")
+        if piid1 and piid2 and piid1 != piid2:
+            record("contract awards offset pagination", "PASS",
+                   f"offset=0: {piid1}, offset=1: {piid2}")
+        elif piid1 and piid2:
+            record("contract awards offset pagination", "INFO",
+                   "same PIID at different offsets (possible if same contract)")
+        else:
+            record("contract awards offset pagination", "FAIL",
+                   "missing PIIDs in paginated results")
+    except Exception as e:
+        record("contract awards offset pagination", "FAIL", str(e)[:120])
 
     # ========== Summary ==========
     return summarize()

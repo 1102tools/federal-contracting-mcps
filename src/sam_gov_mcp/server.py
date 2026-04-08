@@ -1,13 +1,14 @@
 """SAM.gov MCP server.
 
 Provides access to SAM.gov entity registration, exclusion/debarment records,
-and contract opportunity data. Authentication via environment variable
-SAM_API_KEY.
+contract opportunity data, and contract award data (FPDS replacement).
+Authentication via environment variable SAM_API_KEY.
 
-The server wraps three SAM.gov REST APIs:
+The server wraps four SAM.gov REST APIs:
 - Entity Management v3 (/entity-information/v3/entities)
 - Exclusions v4 (/entity-information/v4/exclusions)
 - Get Opportunities v2 (/opportunities/v2/search)
+- Contract Awards v1 (/contract-awards/v1/search)
 - Product/Service Code lookup (/prod/locationservices/v1/api/publicpscdetails)
 
 All tools are read-only. API keys expire every 90 days; on 401/403 errors
@@ -26,6 +27,8 @@ from mcp.server.fastmcp import FastMCP
 
 from .constants import (
     BASE_URL,
+    CONTRACT_AWARDS_MAX_LIMIT,
+    CONTRACT_AWARDS_PATH,
     DEFAULT_TIMEOUT,
     ENTITY_MAX_SIZE,
     ENTITY_PATH,
@@ -169,6 +172,12 @@ async def _get(
         content_type = r.headers.get("content-type", "")
         if "json" in content_type:
             return r.json()
+        # Contract Awards returns plain text for certain errors even on 200
+        # (e.g. "Max value allowed for parameter \"limit\" is 100").
+        # Also returns HTML for auth errors (e.g. <h1>API_KEY_INVALID</h1>).
+        body = r.text.strip()
+        if body and not body.startswith("{"):
+            raise RuntimeError(f"SAM.gov returned non-JSON response: {body[:500]}")
         # Sometimes SAM.gov returns text/html for errors even on 200
         return {"raw_response": r.text}
     except httpx.HTTPStatusError as e:
@@ -632,6 +641,237 @@ async def search_psc_free_text(
         "active": active_only,
     }
     return await _get(PSC_PATH, params)
+
+
+# ---------------------------------------------------------------------------
+# Contract Awards tools (FPDS replacement)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_awards_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the inconsistent Contract Awards response wrapper.
+
+    Populated results: {"awardSummary": [...], "totalRecords": 123, ...}
+    Empty results:     {"awardResponse": {"totalRecords": "0", ...}, "message": "No Data..."}
+
+    This normalizes empty results to match the populated shape so callers
+    always see {"awardSummary": [...], "totalRecords": int, ...}.
+    """
+    if "awardResponse" in data and "awardSummary" not in data:
+        ar = data["awardResponse"]
+        return {
+            "awardSummary": [],
+            "totalRecords": int(ar.get("totalRecords", 0)),
+            "limit": int(ar.get("limit", 10)),
+            "offset": int(ar.get("offset", 0)),
+            "message": data.get("message", ""),
+        }
+    # Populated responses sometimes return totalRecords as a string
+    if "totalRecords" in data:
+        data["totalRecords"] = int(data["totalRecords"])
+    return data
+
+
+@mcp.tool()
+async def search_contract_awards(
+    awardee_name: str | None = None,
+    awardee_uei: str | None = None,
+    awardee_cage_code: str | None = None,
+    piid: str | None = None,
+    naics_code: str | None = None,
+    psc_code: str | None = None,
+    contracting_department_code: str | None = None,
+    contracting_subtier_code: str | None = None,
+    contracting_office_code: str | None = None,
+    date_signed: str | None = None,
+    last_modified_date: str | None = None,
+    fiscal_year: str | None = None,
+    award_or_idv: Literal["AWARD", "IDV"] | None = None,
+    type_of_contract_pricing_code: str | None = None,
+    type_of_set_aside_code: str | None = None,
+    extent_competed_code: str | None = None,
+    dollars_obligated: str | None = None,
+    modification_number: str | None = None,
+    free_text: str | None = None,
+    include_sections: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Search contract award records on SAM.gov (FPDS replacement).
+
+    This is the replacement for FPDS.gov (decommissioned Feb 2026). Same data,
+    new endpoint. Uses limit/offset pagination (NOT page/size).
+
+    CRITICAL date format: MM/dd/yyyy for single dates, [MM/dd/yyyy,MM/dd/yyyy]
+    for ranges (brackets included). ISO 8601 dates are rejected.
+
+    Boolean operators: use ~ for OR (e.g. naics_code="541512~541511"),
+    use ! for NOT (e.g. extent_competed_code="!A").
+
+    Key parameters:
+    - awardee_name: awardeeLegalBusinessName (partial match). NOT "vendorName".
+    - awardee_uei: awardeeUniqueEntityId (exact match)
+    - awardee_cage_code: awardeeCageCode (exact match)
+    - piid: Procurement Instrument Identifier. Returns all mods for that PIID.
+    - naics_code: 6-digit NAICS. Supports ~ for OR, ! for NOT.
+    - psc_code: Product/Service Code (4-char). Supports ~ for OR.
+    - contracting_department_code: top-level department (e.g. "9700" for DoD)
+    - contracting_subtier_code: subtier agency (e.g. "1700" for Navy)
+    - contracting_office_code: contracting office (e.g. "N00039")
+    - date_signed: date of award action. MM/dd/yyyy or [MM/dd/yyyy,MM/dd/yyyy]
+    - last_modified_date: when record was last modified. Same format.
+    - fiscal_year: filter by FY (e.g. "2026")
+    - award_or_idv: "AWARD" for contracts/orders, "IDV" for indefinite-delivery vehicles
+    - type_of_contract_pricing_code: J=FFP, U=CPFF, etc.
+    - type_of_set_aside_code: SBA, 8A, HZC, SDVOSBC, etc.
+    - extent_competed_code: A=Full, B=Not Available, CDO=Competed Under SAP, etc.
+    - dollars_obligated: bracket range [min,max] as string
+    - modification_number: "0" for base award, specific mod number, or range
+    - free_text: q parameter for full-text search across all fields
+    - include_sections: comma-separated: contractId, coreData, awardDetails (default: all)
+    - limit: max records per page (1-100, default 10)
+    - offset: 0-based record skip count for pagination
+
+    Returns normalized response with awardSummary list and totalRecords count.
+    Each record has up to 3 sections: contractId, coreData, awardDetails.
+    """
+    if limit > CONTRACT_AWARDS_MAX_LIMIT:
+        raise ValueError(
+            f"Contract Awards has a hard cap of limit={CONTRACT_AWARDS_MAX_LIMIT}. "
+            f"You passed limit={limit}. Use offset for pagination."
+        )
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1 (got {limit}).")
+
+    params: dict[str, Any] = {
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    if awardee_name:
+        params["awardeeLegalBusinessName"] = awardee_name
+    if awardee_uei:
+        params["awardeeUniqueEntityId"] = awardee_uei
+    if awardee_cage_code:
+        params["awardeeCageCode"] = awardee_cage_code
+    if piid:
+        params["piid"] = piid
+    if naics_code:
+        params["naicsCode"] = naics_code
+    if psc_code:
+        params["productOrServiceCode"] = psc_code
+    if contracting_department_code:
+        params["contractingDepartmentCode"] = contracting_department_code
+    if contracting_subtier_code:
+        params["contractingSubtierCode"] = contracting_subtier_code
+    if contracting_office_code:
+        params["contractingOfficeCode"] = contracting_office_code
+    if date_signed:
+        params["dateSigned"] = date_signed
+    if last_modified_date:
+        params["lastModifiedDate"] = last_modified_date
+    if fiscal_year:
+        params["fiscalYear"] = fiscal_year
+    if award_or_idv:
+        params["awardOrIDV"] = award_or_idv
+    if type_of_contract_pricing_code:
+        params["typeOfContractPricingCode"] = type_of_contract_pricing_code
+    if type_of_set_aside_code:
+        params["typeOfSetAsideCode"] = type_of_set_aside_code
+    if extent_competed_code:
+        params["extentCompetedCode"] = extent_competed_code
+    if dollars_obligated:
+        params["dollarsObligated"] = dollars_obligated
+    if modification_number:
+        params["modificationNumber"] = modification_number
+    if free_text:
+        params["q"] = free_text
+    if include_sections:
+        params["includeSections"] = include_sections
+
+    result = await _get(CONTRACT_AWARDS_PATH, params)
+    return _normalize_awards_response(result)
+
+
+@mcp.tool()
+async def lookup_award_by_piid(
+    piid: str,
+    include_sections: str | None = None,
+) -> dict[str, Any]:
+    """Look up all contract award modifications for a single PIID.
+
+    Returns all modification records for the given Procurement Instrument
+    Identifier, sorted by modification number. This is the primary way to
+    get the full history of a contract action.
+
+    PIIDs are alphanumeric identifiers assigned by the contracting office.
+    Format varies by agency (e.g. "GS-35F-0119Y", "W912BV22P0112",
+    "N0003925F7516"). The search is exact match.
+
+    include_sections: comma-separated list of contractId, coreData, awardDetails.
+    Defaults to all sections if not specified.
+
+    Returns normalized response with awardSummary list containing all
+    modifications. Check totalRecords for the number of mods found.
+    """
+    if not piid or not piid.strip():
+        return {"awardSummary": [], "totalRecords": 0, "_note": "Empty PIID provided."}
+
+    params: dict[str, Any] = {
+        "piid": piid.strip(),
+        "limit": "100",
+        "offset": "0",
+    }
+    if include_sections:
+        params["includeSections"] = include_sections
+
+    result = await _get(CONTRACT_AWARDS_PATH, params)
+    return _normalize_awards_response(result)
+
+
+@mcp.tool()
+async def search_deleted_awards(
+    piid: str | None = None,
+    awardee_name: str | None = None,
+    contracting_department_code: str | None = None,
+    last_modified_date: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Search contract award records that have been deleted from FPDS/SAM.gov.
+
+    Uses the same Contract Awards endpoint with deletedStatus=Y. Deleted
+    records are removed from normal search results but remain accessible
+    through this parameter. Useful for audit trails and historical research.
+
+    Supports the same date format as search_contract_awards:
+    MM/dd/yyyy or [MM/dd/yyyy,MM/dd/yyyy] for ranges.
+
+    limit: 1-100 (default 10). offset: 0-based pagination.
+    """
+    if limit > CONTRACT_AWARDS_MAX_LIMIT:
+        raise ValueError(
+            f"Contract Awards has a hard cap of limit={CONTRACT_AWARDS_MAX_LIMIT}. "
+            f"You passed limit={limit}."
+        )
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1 (got {limit}).")
+
+    params: dict[str, Any] = {
+        "deletedStatus": "Y",
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    if piid:
+        params["piid"] = piid
+    if awardee_name:
+        params["awardeeLegalBusinessName"] = awardee_name
+    if contracting_department_code:
+        params["contractingDepartmentCode"] = contracting_department_code
+    if last_modified_date:
+        params["lastModifiedDate"] = last_modified_date
+
+    result = await _get(CONTRACT_AWARDS_PATH, params)
+    return _normalize_awards_response(result)
 
 
 # ---------------------------------------------------------------------------

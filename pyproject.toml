@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sam-gov-mcp"
-version = "0.1.0"
-description = "MCP server for SAM.gov entity registration, exclusion, and contract opportunity data"
+version = "0.2.0"
+description = "MCP server for SAM.gov entity registration, exclusion, contract opportunity, and contract award data"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "1102tools" }
 ]
-keywords = ["mcp", "model-context-protocol", "sam.gov", "federal-contracts", "procurement", "exclusions", "debarment", "1102"]
+keywords = ["mcp", "model-context-protocol", "sam.gov", "federal-contracts", "procurement", "exclusions", "debarment", "contract-awards", "FPDS", "1102"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

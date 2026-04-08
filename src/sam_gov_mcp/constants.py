@@ -6,14 +6,16 @@ EXCLUSIONS_PATH = "/entity-information/v4/exclusions"
 OPPORTUNITIES_PATH = "/opportunities/v2/search"
 OPPORTUNITY_DESC_PATH = "/prod/opportunities/v1/noticedesc"
 PSC_PATH = "/prod/locationservices/v1/api/publicpscdetails"
+CONTRACT_AWARDS_PATH = "/contract-awards/v1/search"
 
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "sam-gov-mcp/0.1.0"
+USER_AGENT = "sam-gov-mcp/0.2.0"
 
 # Hard caps from the SAM.gov API (enforce client-side to give good errors)
 ENTITY_MAX_SIZE = 10          # Entity Management has a hard cap of 10
 OPPORTUNITY_MAX_LIMIT = 1000  # Opportunities accepts large limits
 EXCLUSION_MAX_SIZE = 100      # Exclusions typical cap
+CONTRACT_AWARDS_MAX_LIMIT = 100  # Contract Awards hard cap
 
 # Notice type codes (ptype parameter on Opportunities)
 NOTICE_TYPES: dict[str, str] = {
