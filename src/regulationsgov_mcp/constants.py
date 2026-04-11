@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 James Jenrette / 1102tools
 """Constants for the Regulations.gov MCP server."""
 
 BASE_URL = "https://api.regulations.gov/v4"
