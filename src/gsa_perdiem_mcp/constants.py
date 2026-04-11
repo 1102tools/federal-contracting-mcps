@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 James Jenrette / 1102tools
 """Constants for the GSA Per Diem MCP server."""
 
 BASE_URL = "https://api.gsa.gov/travel/perdiem/v2/rates"
