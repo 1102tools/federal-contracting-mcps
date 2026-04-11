@@ -1,7 +1,6 @@
 # Changelog
 
-## 0.1.0 (2026-04-05)
-
+## 0.1.0
 Initial release.
 
 - 8 MCP tools covering the GSA CALC+ Labor Ceiling Rates API

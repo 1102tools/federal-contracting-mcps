@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """Constants for the GSA CALC+ MCP server."""
 
 BASE_URL = "https://api.gsa.gov/acquisition/calc/v3/api/ceilingrates/"
