@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 James Jenrette / 1102tools
 """GSA CALC+ MCP server.
 
 Provides access to awarded GSA MAS schedule ceiling rates for labor
