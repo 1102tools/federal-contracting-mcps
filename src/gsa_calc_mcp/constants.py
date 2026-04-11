@@ -4,7 +4,7 @@
 
 BASE_URL = "https://api.gsa.gov/acquisition/calc/v3/api/ceilingrates/"
 DEFAULT_TIMEOUT = 15.0
-USER_AGENT = "gsa-calc-mcp/0.1.0"
+USER_AGENT = "gsa-calc-mcp/0.1.1"
 
 MAX_PAGE_SIZE = 500
 RATE_LIMIT_PER_HOUR = 1000
