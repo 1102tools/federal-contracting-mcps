@@ -1,7 +1,6 @@
 # Changelog
 
-## 0.1.0 (2026-04-05)
-
+## 0.1.0
 Initial release.
 
 - 7 MCP tools covering the GSA Per Diem Rates API
