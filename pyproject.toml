@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "1102tools" }
+    { name = "James Jenrette / 1102tools" }
 ]
 keywords = ["mcp", "model-context-protocol", "sam.gov", "federal-contracts", "procurement", "exclusions", "debarment", "contract-awards", "FPDS", "1102"]
 classifiers = [
