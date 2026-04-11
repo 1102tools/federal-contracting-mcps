@@ -4,7 +4,7 @@
 
 BASE_URL = "https://api.regulations.gov/v4"
 DEFAULT_TIMEOUT = 15.0
-USER_AGENT = "regulationsgov-mcp/0.1.0"
+USER_AGENT = "regulationsgov-mcp/0.1.1"
 
 MIN_PAGE_SIZE = 5
 MAX_PAGE_SIZE = 250
