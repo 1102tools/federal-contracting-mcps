@@ -4,7 +4,7 @@
 
 BASE_URL = "https://www.federalregister.gov/api/v1"
 DEFAULT_TIMEOUT = 15.0
-USER_AGENT = "federal-register-mcp/0.1.0"
+USER_AGENT = "federal-register-mcp/0.1.1"
 
 DOCUMENT_TYPES = {
     "PRORULE": "Proposed Rule",
