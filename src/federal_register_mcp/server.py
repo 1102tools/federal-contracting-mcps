@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """Federal Register MCP server.
 
 Free, no-auth access to all Federal Register content since 1994: proposed
