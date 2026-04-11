@@ -1,7 +1,6 @@
 # Changelog
 
-## 0.2.0 (2026-04-07)
-
+## 0.2.0
 Contract Awards API support (FPDS replacement).
 
 - 3 new tools: search_contract_awards, lookup_award_by_piid, search_deleted_awards
@@ -11,8 +10,7 @@ Contract Awards API support (FPDS replacement).
 - Client-side limit validation (max 100) with actionable error messages
 - 15 total tools (was 12)
 
-## 0.1.0 (2026-04-05)
-
+## 0.1.0
 Initial release.
 
 - 12 MCP tools covering three SAM.gov REST APIs plus PSC lookup
