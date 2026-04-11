@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """USASpending.gov MCP server.
 
 Provides access to federal contract, grant, loan, and award data from

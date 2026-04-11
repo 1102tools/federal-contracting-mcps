@@ -1,7 +1,6 @@
 # Changelog
 
-## 0.1.2 (2026-04-05)
-
+## 0.1.2
 Initial release.
 
 - 17 MCP tools covering the USASpending.gov REST API
