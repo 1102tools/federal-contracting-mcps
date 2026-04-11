@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """Constants for the BLS OEWS MCP server."""
 
 BASE_URL_V2 = "https://api.bls.gov/publicAPI/v2/timeseries/data/"

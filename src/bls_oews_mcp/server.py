@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """BLS OEWS MCP server.
 
 Provides access to Bureau of Labor Statistics Occupational Employment and
