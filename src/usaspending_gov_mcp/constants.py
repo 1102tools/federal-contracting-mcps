@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 James Jenrette / 1102tools
 """Constants and reference data for the USASpending API."""
 
 BASE_URL = "https://api.usaspending.gov"
