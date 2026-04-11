@@ -5,7 +5,7 @@
 BASE_URL_V2 = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BASE_URL_V1 = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "bls-oews-mcp/0.1.0"
+USER_AGENT = "bls-oews-mcp/0.1.1"
 
 # OEWS data lags ~2 years. Do NOT use the calendar year.
 # May 2024 estimates released April 2025. Next: May 2025 estimates in ~April 2026.
