@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """eCFR MCP server.
 
 Provides access to the full text, structure, version history, and search
