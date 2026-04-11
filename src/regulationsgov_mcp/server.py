@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 James Jenrette / 1102tools
+# Copyright (c) James Jenrette / 1102tools
 """Regulations.gov MCP server.
 
 Federal rulemaking dockets, documents, public comments, and comment period

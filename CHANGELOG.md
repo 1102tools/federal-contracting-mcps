@@ -1,7 +1,6 @@
 # Changelog
 
-## 0.1.0 (2026-04-05)
-
+## 0.1.0
 Initial release.
 
 - 9 MCP tools covering the Regulations.gov API (documents, comments, dockets)
