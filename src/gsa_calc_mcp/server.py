@@ -14,8 +14,11 @@ Data refreshes nightly from GSA MAS contract price proposal tables.
 
 from __future__ import annotations
 
+import json
+import math
+import re
 import urllib.parse
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -23,11 +26,235 @@ from mcp.server.fastmcp import FastMCP
 from .constants import (
     BASE_URL,
     DEFAULT_TIMEOUT,
+    EDUCATION_LEVELS,
     MAX_PAGE_SIZE,
+    ORDERING_FIELDS,
     USER_AGENT,
+    WORKSITE_VALUES,
 )
 
 mcp = FastMCP("gsa-calc")
+
+
+# ---------------------------------------------------------------------------
+# Defensive response parsing helpers
+# ---------------------------------------------------------------------------
+
+def _safe_dict(value: Any) -> dict[str, Any]:
+    """Return value if it's a dict, else empty dict. Tolerates None, list, str."""
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Return value as a list. XML-to-JSON collapse tolerant."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _safe_bucket_key(b: Any) -> tuple[Any, Any] | None:
+    """Extract (key, doc_count) from a bucket item. Returns None if invalid."""
+    if not isinstance(b, dict):
+        return None
+    key = b.get("key")
+    count = b.get("doc_count")
+    if key is None or count is None:
+        return None
+    return (key, count)
+
+
+def _safe_number(value: Any) -> float | int | None:
+    """Coerce to a real number, rejecting None, NaN, Inf. Used for stats values."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float)):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Input validators
+# ---------------------------------------------------------------------------
+
+_ASCII_PRINTABLE_SAFE_RE = re.compile(r"^[A-Za-z0-9 \-_,.:/()&#+|*@$]*$")
+
+# WAF triggers for GSA's firewall (observed empirically: quote, SQL, angle brackets,
+# path traversal all return 403/503)
+_WAF_PATTERNS = [
+    (re.compile(r"\.\./"), "path traversal ('../')"),
+    (re.compile(r"<[a-z/]", re.IGNORECASE), "HTML angle brackets"),
+    (re.compile(r"\b(?:drop|select|union|insert|delete|truncate)\s+(?:table|from)\b",
+                re.IGNORECASE), "SQL keywords"),
+    (re.compile(r"--\s*$", re.MULTILINE), "SQL comment marker"),
+    (re.compile(r"/\*|\*/"), "SQL block comment"),
+    (re.compile(r"['`;]"), "single quote, backtick, or semicolon"),
+    (re.compile(r"\x00"), "null byte"),
+]
+
+
+def _validate_waf_safe(value: str | None, *, field: str) -> str | None:
+    """Reject strings containing characters that trigger GSA's WAF."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    for pattern, description in _WAF_PATTERNS:
+        if pattern.search(value):
+            raise ValueError(
+                f"{field}={value!r} contains characters that trigger GSA CALC+'s "
+                f"web application firewall ({description}). Remove the offending "
+                f"characters and try again (empirically: quotes, SQL keywords, "
+                f"angle brackets, path traversal, semicolons all trigger 403/503)."
+            )
+    return value
+
+
+def _strip_or_none(value: str | None) -> str | None:
+    """Strip whitespace; return None if result is empty."""
+    if value is None:
+        return None
+    s = value.strip() if isinstance(value, str) else str(value).strip()
+    return s or None
+
+
+def _clamp(value: int, *, field: str, lo: int, hi: int) -> int:
+    if value < lo:
+        raise ValueError(f"{field} must be >= {lo}. Got {value}.")
+    if value > hi:
+        raise ValueError(
+            f"{field} exceeds maximum of {hi}. Got {value}. Paginate instead."
+        )
+    return value
+
+
+def _validate_ordering(value: str | None) -> str:
+    """Validate against ORDERING_FIELDS whitelist. Returns default if None."""
+    if value is None:
+        return "current_price"
+    s = value.strip() if isinstance(value, str) else str(value).strip()
+    if not s:
+        return "current_price"
+    if s not in ORDERING_FIELDS:
+        raise ValueError(
+            f"ordering={value!r} is not a valid field. "
+            f"Valid: {', '.join(ORDERING_FIELDS)}."
+        )
+    return s
+
+
+def _validate_sort(value: str) -> str:
+    if value is None:
+        return "asc"
+    s = value.strip().lower() if isinstance(value, str) else str(value).strip().lower()
+    if s not in ("asc", "desc"):
+        raise ValueError(f"sort must be 'asc' or 'desc'. Got {value!r}.")
+    return s
+
+
+def _validate_education_level(value: str | None) -> str | None:
+    """Validate an education level. Supports pipe-delimited OR (e.g. 'BA|MA')."""
+    if value is None:
+        return None
+    s = value.strip() if isinstance(value, str) else str(value).strip()
+    if not s:
+        return None
+    parts = [p.strip() for p in s.split("|")]
+    for p in parts:
+        if not p:
+            raise ValueError(f"education_level {value!r} has an empty entry between pipes.")
+        if p not in EDUCATION_LEVELS:
+            valid = ", ".join(sorted(EDUCATION_LEVELS.keys()))
+            raise ValueError(
+                f"education_level entry {p!r} not valid. Valid codes: {valid}. "
+                f"Pipe-delimit for OR (e.g. 'BA|MA')."
+            )
+    return "|".join(parts)
+
+
+def _validate_worksite(value: str | None) -> str | None:
+    if value is None:
+        return None
+    s = value.strip() if isinstance(value, str) else str(value).strip()
+    if not s:
+        return None
+    # Case-normalize to match GSA's expected capitalization
+    match = next((v for v in WORKSITE_VALUES if v.lower() == s.lower()), None)
+    if match is None:
+        raise ValueError(
+            f"worksite={value!r} not valid. Valid: {', '.join(sorted(WORKSITE_VALUES))}."
+        )
+    return match
+
+
+def _validate_sin(value: Any) -> str | None:
+    """SIN codes are alphanumeric (e.g., '54151S', '541330ENG'). No special chars."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if not re.match(r"^[A-Za-z0-9]+$", s):
+        raise ValueError(
+            f"sin={value!r} must be alphanumeric (e.g. '54151S', '541330ENG'). "
+            f"No spaces or special characters."
+        )
+    return s
+
+
+def _validate_experience_range(emin: int | None, emax: int | None) -> tuple[int | None, int | None]:
+    if emin is not None and emin < 0:
+        raise ValueError(f"experience_min must be >= 0. Got {emin}.")
+    if emax is not None and emax < 0:
+        raise ValueError(f"experience_max must be >= 0. Got {emax}.")
+    if emin is not None and emax is not None and emin > emax:
+        raise ValueError(
+            f"experience_min ({emin}) must be <= experience_max ({emax})."
+        )
+    return emin, emax
+
+
+def _validate_price_range(pmin: float | None, pmax: float | None) -> tuple[float | None, float | None]:
+    if pmin is not None and pmin < 0:
+        raise ValueError(f"price_min must be >= 0. Got {pmin}.")
+    if pmax is not None and pmax < 0:
+        raise ValueError(f"price_max must be >= 0. Got {pmax}.")
+    if pmin is not None and pmax is not None and pmin > pmax:
+        raise ValueError(
+            f"price_min (${pmin}) must be <= price_max (${pmax})."
+        )
+    return pmin, pmax
+
+
+_HTML_ERROR_RE = re.compile(r"<(?:!doctype|html)", re.IGNORECASE)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+
+
+def _clean_error_body(text: str) -> str:
+    """Strip HTML bodies from upstream error responses for clean messages."""
+    if not text:
+        return ""
+    if not _HTML_ERROR_RE.search(text):
+        return text[:400]
+    pieces: list[str] = []
+    t = _TITLE_RE.search(text)
+    if t:
+        pieces.append(t.group(1).strip())
+    h = _H1_RE.search(text)
+    if h and (not t or h.group(1).strip() != t.group(1).strip()):
+        pieces.append(h.group(1).strip())
+    return " - ".join(pieces) if pieces else "upstream returned HTML error page"
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +275,7 @@ def _get_client() -> httpx.AsyncClient:
 
 
 def _format_error(status: int, body: str) -> str:
+    cleaned = _clean_error_body(body)
     if status == 403:
         return (
             "HTTP 403: Forbidden. GSA's web application firewall blocked this request. "
@@ -59,9 +287,9 @@ def _format_error(status: int, body: str) -> str:
         return (
             "HTTP 406: Not Acceptable. Common causes: (1) keyword or query string "
             "is too long; (2) page number is out of valid range; (3) ordering field "
-            "name is invalid. Valid ordering: current_price, labor_category, "
-            "vendor_name, education_level, min_years_experience. "
-            f"API response: {body[:300]}"
+            "name is invalid. Valid ordering: "
+            f"{', '.join(ORDERING_FIELDS)}. "
+            f"API response: {cleaned}"
         )
     if status == 429:
         return (
@@ -75,8 +303,8 @@ def _format_error(status: int, body: str) -> str:
             "Remove special characters (quotes, angle brackets, SQL keywords) and retry."
         )
     if status == 400:
-        return f"HTTP 400: Bad request. Check filter format (field:value) and page_size (max 500). API response: {body[:300]}"
-    return f"HTTP {status}: {body[:400]}"
+        return f"HTTP 400: Bad request. Check filter format (field:value) and page_size (max 500). API response: {cleaned}"
+    return f"HTTP {status}: {cleaned}"
 
 
 async def _get(params_str: str) -> dict[str, Any]:
@@ -85,7 +313,22 @@ async def _get(params_str: str) -> dict[str, Any]:
     try:
         r = await _get_client().get(url)
         r.raise_for_status()
-        return r.json()
+        try:
+            data = r.json()
+        except json.JSONDecodeError as e:
+            body_preview = _clean_error_body(r.text or "(empty body)")
+            raise RuntimeError(
+                f"GSA CALC+ returned non-JSON response on 200 OK. "
+                f"This often happens during API maintenance or when an HTML "
+                f"error page is served without an error status. "
+                f"Body: {body_preview}"
+            ) from e
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"GSA CALC+ response was not a JSON object. "
+                f"Got {type(data).__name__}: {str(data)[:200]}"
+            )
+        return data
     except httpx.HTTPStatusError as e:
         raise RuntimeError(_format_error(e.response.status_code, e.response.text[:500])) from e
     except httpx.RequestError as e:
@@ -108,18 +351,27 @@ def _build_filters(
     sin: str | None = None,
     worksite: str | None = None,
 ) -> list[str]:
-    """Build filter strings for the CALC+ API."""
-    filters = []
+    """Build filter strings for the CALC+ API.
+
+    Values are URL-encoded at the call site of _build_query_string. This helper
+    only composes the `field:value` pieces.
+    """
+    filters: list[str] = []
     if education_level:
         filters.append(f"education_level:{education_level}")
+    # Experience: support either both, min-only, or max-only
     if experience_min is not None and experience_max is not None:
         filters.append(f"experience_range:{experience_min},{experience_max}")
     elif experience_min is not None:
         filters.append(f"min_years_experience:{experience_min}")
+    elif experience_max is not None:
+        filters.append(f"experience_range:0,{experience_max}")
+    # Price: support either both, min-only, or max-only
     if price_min is not None and price_max is not None:
         filters.append(f"price_range:{price_min},{price_max}")
     elif price_min is not None:
-        filters.append(f"price_range:{price_min},99999")
+        # No hardcoded upper bound — use an explicit sentinel that won't truncate real data
+        filters.append(f"price_range:{price_min},999999")
     elif price_max is not None:
         filters.append(f"price_range:0,{price_max}")
     if business_size:
@@ -147,62 +399,136 @@ def _build_query_string(
     sort: str = "asc",
     exclude: str | None = None,
 ) -> str:
-    """Build the full query parameter string."""
+    """Build the full query parameter string. All values URL-encoded."""
+    # Filters param must be a list; protect against accidental string passage.
+    if filters is not None and not isinstance(filters, list):
+        raise ValueError(
+            f"filters must be a list of 'field:value' strings. "
+            f"Got {type(filters).__name__}."
+        )
+
     parts: list[str] = []
+
+    # Precedence: keyword > search > suggest. Reject combinations to prevent
+    # silent dropping of the non-selected search mode.
+    search_modes = sum([
+        keyword is not None,
+        bool(search_field and search_value),
+        bool(suggest_field and suggest_term),
+    ])
+    if search_modes > 1:
+        raise ValueError(
+            "Only one search mode allowed per query: keyword, search (field+value), "
+            "or suggest (field+term). Combining silently drops the lower-priority modes."
+        )
 
     if keyword is not None:
         parts.append(f"keyword={urllib.parse.quote_plus(keyword)}")
     elif search_field and search_value:
-        parts.append(f"search={search_field}:{urllib.parse.quote_plus(search_value)}")
+        parts.append(
+            f"search={search_field}:{urllib.parse.quote_plus(search_value)}"
+        )
     elif suggest_field and suggest_term:
-        parts.append(f"suggest-contains={suggest_field}:{urllib.parse.quote_plus(suggest_term)}")
+        parts.append(
+            f"suggest-contains={suggest_field}:{urllib.parse.quote_plus(suggest_term)}"
+        )
 
+    # URL-encode each filter's value portion. Filters are "field:value" strings;
+    # split once, encode value, rejoin.
     if filters:
         for f in filters:
-            parts.append(f"filter={f}")
+            if not isinstance(f, str) or not f:
+                continue
+            if ":" in f:
+                field, value = f.split(":", 1)
+                parts.append(f"filter={field}:{urllib.parse.quote_plus(value)}")
+            else:
+                parts.append(f"filter={urllib.parse.quote_plus(f)}")
 
     parts.append(f"page={page}")
     parts.append(f"page_size={min(page_size, MAX_PAGE_SIZE)}")
-    parts.append(f"ordering={ordering}")
-    parts.append(f"sort={sort}")
+    parts.append(f"ordering={urllib.parse.quote_plus(ordering)}")
+    parts.append(f"sort={urllib.parse.quote_plus(sort)}")
 
     if exclude:
-        parts.append(f"exclude={exclude}")
+        parts.append(f"exclude={urllib.parse.quote_plus(exclude)}")
 
     return "&".join(parts)
 
 
-def _extract_stats(data: dict[str, Any]) -> dict[str, Any]:
-    """Extract key statistics from the aggregations in a response."""
-    aggs = data.get("aggregations", {})
-    wage_stats = aggs.get("wage_stats", {})
-    percentiles = aggs.get("histogram_percentiles", {}).get("values", {})
-    ed_counts = aggs.get("education_level_counts", {}).get("buckets", [])
-    biz_size = aggs.get("business_size", {}).get("buckets", [])
+def _extract_stats(data: Any) -> dict[str, Any]:
+    """Extract key statistics from the aggregations in a response.
 
-    hits_total = data.get("hits", {}).get("total", {})
-    true_count = wage_stats.get("count", hits_total.get("value", 0))
+    Fully defensive — tolerates every GSA CALC+ / ES response shape observed
+    in testing: aggregations as null / list / str, wage_stats as null, percentile
+    values as null, std_deviation_bounds as null, bucket items with None entries
+    or missing key/doc_count, hits.total as int or None, wage_stats.avg/std as
+    NaN/Inf. Never raises; returns a structured response with Nones for missing
+    values.
+    """
+    data = _safe_dict(data)
+    aggs = _safe_dict(data.get("aggregations"))
+    wage_stats = _safe_dict(aggs.get("wage_stats"))
+    percentiles = _safe_dict(_safe_dict(aggs.get("histogram_percentiles")).get("values"))
+    ed_counts = _as_list(_safe_dict(aggs.get("education_level_counts")).get("buckets"))
+    biz_size = _as_list(_safe_dict(aggs.get("business_size")).get("buckets"))
+    std_bounds = _safe_dict(wage_stats.get("std_deviation_bounds"))
+
+    hits = _safe_dict(data.get("hits"))
+    hits_total = hits.get("total")
+    if isinstance(hits_total, dict):
+        total_value = hits_total.get("value", 0)
+        capped = hits_total.get("relation") == "gte"
+    elif isinstance(hits_total, int):
+        # ES 6 legacy format: total is just an int
+        total_value = hits_total
+        capped = False
+    else:
+        total_value = 0
+        capped = False
+
+    wage_count = wage_stats.get("count")
+    true_count = wage_count if isinstance(wage_count, int) else total_value
+
+    def _round_or_none(v: Any) -> float | None:
+        n = _safe_number(v)
+        return round(n, 2) if n is not None else None
+
+    def _bucket_dict(buckets: list[Any]) -> dict[Any, Any]:
+        out: dict[Any, Any] = {}
+        for b in buckets:
+            pair = _safe_bucket_key(b)
+            if pair is not None:
+                out[pair[0]] = pair[1]
+        return out
+
+    # Percentile keys might be "10.0" string or 10 int or even 10.0 float
+    def _pct(key: float) -> Any:
+        for k in (f"{key}", f"{key:.1f}", key, int(key)):
+            if k in percentiles:
+                return _safe_number(percentiles[k])
+        return None
 
     return {
-        "total_rates": true_count,
-        "hits_capped": hits_total.get("relation") == "gte",
-        "min_rate": wage_stats.get("min"),
-        "max_rate": wage_stats.get("max"),
-        "avg_rate": round(wage_stats.get("avg", 0), 2) if wage_stats.get("avg") else None,
-        "std_deviation": round(wage_stats.get("std_deviation", 0), 2) if wage_stats.get("std_deviation") else None,
+        "total_rates": true_count if true_count is not None else 0,
+        "hits_capped": capped,
+        "min_rate": _safe_number(wage_stats.get("min")),
+        "max_rate": _safe_number(wage_stats.get("max")),
+        "avg_rate": _round_or_none(wage_stats.get("avg")),
+        "std_deviation": _round_or_none(wage_stats.get("std_deviation")),
         "percentiles": {
-            "p10": percentiles.get("10.0"),
-            "p25": percentiles.get("25.0"),
-            "p50_median": percentiles.get("50.0"),
-            "p75": percentiles.get("75.0"),
-            "p90": percentiles.get("90.0"),
+            "p10": _pct(10.0),
+            "p25": _pct(25.0),
+            "p50_median": _pct(50.0),
+            "p75": _pct(75.0),
+            "p90": _pct(90.0),
         },
         "outlier_bounds_2sigma": {
-            "lower": wage_stats.get("std_deviation_bounds", {}).get("lower"),
-            "upper": wage_stats.get("std_deviation_bounds", {}).get("upper"),
+            "lower": _safe_number(std_bounds.get("lower")),
+            "upper": _safe_number(std_bounds.get("upper")),
         },
-        "education_breakdown": {b["key"]: b["doc_count"] for b in ed_counts},
-        "business_size_breakdown": {b["key"]: b["doc_count"] for b in biz_size},
+        "education_breakdown": _bucket_dict(ed_counts),
+        "business_size_breakdown": _bucket_dict(biz_size),
     }
 
 
@@ -220,7 +546,7 @@ async def keyword_search(
     price_max: float | None = None,
     business_size: Literal["S", "O"] | None = None,
     security_clearance: Literal["yes", "no"] | None = None,
-    sin: str | None = None,
+    sin: Union[str, int, None] = None,
     worksite: str | None = None,
     page: int = 1,
     page_size: int = 100,
@@ -257,10 +583,27 @@ async def keyword_search(
 
     exclude: pipe-delimited hit _id values to exclude from results and stats.
     """
-    if page_size > MAX_PAGE_SIZE:
-        raise ValueError(f"page_size max is {MAX_PAGE_SIZE}. Got {page_size}.")
-    if page_size < 1:
-        raise ValueError(f"page_size must be at least 1. Got {page_size}.")
+    keyword = _strip_or_none(keyword)
+    if keyword is None:
+        raise ValueError(
+            "keyword cannot be empty. For unfiltered browsing use filtered_browse() instead."
+        )
+    keyword = _validate_waf_safe(keyword, field="keyword")
+    if len(keyword) > 500:
+        raise ValueError(
+            f"keyword exceeds 500 chars ({len(keyword)}). Very long keywords trigger "
+            f"HTTP 406 URI-too-long errors."
+        )
+    page = _clamp(page, field="page", lo=1, hi=100_000)
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
+    price_min, price_max = _validate_price_range(price_min, price_max)
+    education_level = _validate_education_level(education_level)
+    worksite = _validate_worksite(worksite)
+    sin = _validate_sin(sin)
+    ordering = _validate_ordering(ordering)
+    sort = _validate_sort(sort)
+    exclude = _strip_or_none(exclude)
 
     filters = _build_filters(
         education_level=education_level, experience_min=experience_min,
@@ -299,10 +642,19 @@ async def exact_search(
 
     Fields: labor_category, vendor_name, idv_piid (GSA MAS contract number).
     """
-    if page_size > MAX_PAGE_SIZE:
-        raise ValueError(f"page_size max is {MAX_PAGE_SIZE}. Got {page_size}.")
-    if not value or not value.strip():
+    value = _strip_or_none(value)
+    if value is None:
         raise ValueError("value cannot be empty. Use suggest_contains() to discover valid values.")
+    value = _validate_waf_safe(value, field="value")
+    if len(value) > 500:
+        raise ValueError(f"value exceeds 500 chars. Got {len(value)}.")
+    page = _clamp(page, field="page", lo=1, hi=100_000)
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
+    price_min, price_max = _validate_price_range(price_min, price_max)
+    education_level = _validate_education_level(education_level)
+    ordering = _validate_ordering(ordering)
+    sort = _validate_sort(sort)
 
     filters = _build_filters(
         education_level=education_level, experience_min=experience_min,
@@ -310,7 +662,7 @@ async def exact_search(
         business_size=business_size,
     )
     qs = _build_query_string(
-        search_field=field, search_value=value.strip(), filters=filters,
+        search_field=field, search_value=value, filters=filters,
         page=page, page_size=page_size, ordering=ordering, sort=sort,
     )
     data = await _get(qs)
@@ -333,20 +685,39 @@ async def suggest_contains(
     1. suggest_contains('vendor_name', 'booz') -> finds 'Booz Allen Hamilton Inc.'
     2. exact_search('vendor_name', 'Booz Allen Hamilton Inc.') -> all their rates
     """
-    if not term or len(term.strip()) < 2:
+    term = _strip_or_none(term)
+    if term is None or len(term) < 2:
         raise ValueError(
-            "suggest_contains requires at least 2 characters. "
-            f"Got {term!r}."
+            "suggest_contains requires at least 2 non-whitespace characters."
         )
-    qs = _build_query_string(suggest_field=field, suggest_term=term.strip())
+    term = _validate_waf_safe(term, field="term")
+
+    qs = _build_query_string(suggest_field=field, suggest_term=term)
     data = await _get(qs)
 
-    buckets = data.get("aggregations", {}).get(field, {}).get("buckets", [])
+    buckets = _as_list(
+        _safe_dict(_safe_dict(data.get("aggregations")).get(field)).get("buckets")
+    )
+    suggestions: list[dict[str, Any]] = []
+    for b in buckets:
+        pair = _safe_bucket_key(b)
+        if pair is not None:
+            suggestions.append({"value": pair[0], "count": pair[1]})
+
+    hits = _safe_dict(data.get("hits"))
+    total_obj = hits.get("total")
+    if isinstance(total_obj, dict):
+        total = total_obj.get("value", 0)
+    elif isinstance(total_obj, int):
+        total = total_obj
+    else:
+        total = 0
+
     return {
         "field": field,
         "search_term": term,
-        "suggestions": [{"value": b["key"], "count": b["doc_count"]} for b in buckets],
-        "total_matching_records": data.get("hits", {}).get("total", {}).get("value", 0),
+        "suggestions": suggestions,
+        "total_matching_records": total,
     }
 
 
@@ -359,7 +730,7 @@ async def filtered_browse(
     price_max: float | None = None,
     business_size: Literal["S", "O"] | None = None,
     security_clearance: Literal["yes", "no"] | None = None,
-    sin: str | None = None,
+    sin: Union[str, int, None] = None,
     worksite: str | None = None,
     page: int = 1,
     page_size: int = 100,
@@ -372,8 +743,15 @@ async def filtered_browse(
     5-15 years experience look like across all of GSA MAS?" Returns rate
     records plus full aggregation statistics.
     """
-    if page_size > MAX_PAGE_SIZE:
-        raise ValueError(f"page_size max is {MAX_PAGE_SIZE}. Got {page_size}.")
+    page = _clamp(page, field="page", lo=1, hi=100_000)
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
+    price_min, price_max = _validate_price_range(price_min, price_max)
+    education_level = _validate_education_level(education_level)
+    worksite = _validate_worksite(worksite)
+    sin = _validate_sin(sin)
+    ordering = _validate_ordering(ordering)
+    sort = _validate_sort(sort)
 
     filters = _build_filters(
         education_level=education_level, experience_min=experience_min,
@@ -400,7 +778,7 @@ async def igce_benchmark(
     experience_min: int | None = None,
     experience_max: int | None = None,
     business_size: Literal["S", "O"] | None = None,
-    sin: str | None = None,
+    sin: Union[str, int, None] = None,
 ) -> dict[str, Any]:
     """Get ceiling rate benchmarks for IGCE development.
 
@@ -415,6 +793,14 @@ async def igce_benchmark(
     Reminder: these are ceiling rates (max a contractor can charge), not
     prices paid. Actual task order rates should be lower per FAR 8.405-2(d).
     """
+    labor_category = _strip_or_none(labor_category)
+    if labor_category is None:
+        raise ValueError("labor_category cannot be empty.")
+    labor_category = _validate_waf_safe(labor_category, field="labor_category")
+    experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
+    education_level = _validate_education_level(education_level)
+    sin = _validate_sin(sin)
+
     filters = _build_filters(
         education_level=education_level, experience_min=experience_min,
         experience_max=experience_max, business_size=business_size, sin=sin,
@@ -453,26 +839,31 @@ async def price_reasonableness_check(
     A rate above P75 may be high; above P90 warrants scrutiny. A rate below
     P25 may indicate an unrealistically low offer (potential performance risk).
     """
+    if not isinstance(proposed_rate, (int, float)) or isinstance(proposed_rate, bool):
+        raise ValueError("proposed_rate must be a positive number.")
+    if proposed_rate <= 0:
+        raise ValueError(f"proposed_rate must be > 0. Got {proposed_rate}.")
+
     benchmark = await igce_benchmark(
         labor_category, education_level=education_level,
         experience_min=experience_min, experience_max=experience_max,
         business_size=business_size,
     )
 
-    if benchmark["total_rates"] == 0:
+    if benchmark.get("total_rates", 0) == 0:
         return {
             "status": "NO_DATA",
             "proposed_rate": proposed_rate,
             "message": f"No comparable ceiling rates found for '{labor_category}' with the given filters.",
         }
 
-    avg = benchmark["avg_rate"] or 0
-    std = benchmark["std_deviation"] or 0
-    median = benchmark["percentiles"]["p50_median"]
-    p25 = benchmark["percentiles"]["p25"]
-    p75 = benchmark["percentiles"]["p75"]
+    avg = benchmark.get("avg_rate") or 0
+    std = benchmark.get("std_deviation") or 0
+    median = benchmark.get("percentiles", {}).get("p50_median")
+    p25 = benchmark.get("percentiles", {}).get("p25")
+    p75 = benchmark.get("percentiles", {}).get("p75")
 
-    z_score = round((proposed_rate - avg) / std, 2) if std > 0 else 0
+    z_score = round((proposed_rate - avg) / std, 2) if std and std > 0 else 0
 
     iqr_position = None
     if p25 is not None and p75 is not None:
@@ -483,15 +874,25 @@ async def price_reasonableness_check(
         else:
             iqr_position = "above P75 (high)"
 
+    # Don't force "above" when median is missing; say "unknown"
+    if median is None:
+        vs_median = "unknown (median unavailable)"
+    elif proposed_rate < median:
+        vs_median = "below"
+    elif proposed_rate > median:
+        vs_median = "above"
+    else:
+        vs_median = "equal"
+
     return {
         **benchmark,
         "proposed_rate": proposed_rate,
         "analysis": {
             "z_score": z_score,
-            "vs_median": "below" if median and proposed_rate < median else "above",
+            "vs_median": vs_median,
             "iqr_position": iqr_position,
             "delta_from_avg": round(proposed_rate - avg, 2),
-            "delta_from_avg_pct": round(((proposed_rate - avg) / avg) * 100, 1) if avg > 0 else None,
+            "delta_from_avg_pct": round(((proposed_rate - avg) / avg) * 100, 1) if avg and avg > 0 else None,
         },
     }
 
@@ -500,6 +901,8 @@ async def price_reasonableness_check(
 async def vendor_rate_card(
     vendor_name: str,
     page_size: int = 500,
+    ordering: str = "labor_category",
+    sort: Literal["asc", "desc"] = "asc",
 ) -> dict[str, Any]:
     """Get all ceiling rates for a specific vendor.
 
@@ -509,37 +912,54 @@ async def vendor_rate_card(
 
     Pass a partial name (e.g., 'booz' for Booz Allen Hamilton). The tool
     finds the exact registered name automatically.
+
+    If the discovery term matches multiple vendors, this tool picks the one
+    with the most rate records and returns a _candidates list so the caller
+    can re-query with a more specific term if needed.
     """
-    if page_size > MAX_PAGE_SIZE:
-        raise ValueError(f"page_size max is {MAX_PAGE_SIZE}. Got {page_size}.")
-    if not vendor_name or len(vendor_name.strip()) < 2:
-        raise ValueError("vendor_name must be at least 2 characters.")
+    vendor_name = _strip_or_none(vendor_name)
+    if vendor_name is None or len(vendor_name) < 2:
+        raise ValueError("vendor_name must be at least 2 non-whitespace characters.")
+    vendor_name = _validate_waf_safe(vendor_name, field="vendor_name")
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    ordering = _validate_ordering(ordering)
+    sort = _validate_sort(sort)
 
     # Step 1: discover exact name
     discovery = await suggest_contains("vendor_name", vendor_name)
-    if not discovery["suggestions"]:
+    suggestions = discovery.get("suggestions", [])
+    if not suggestions:
         return {
             "vendor_search": vendor_name,
             "error": f"No vendor found matching '{vendor_name}'. Try a shorter or different term.",
         }
 
-    exact_name = discovery["suggestions"][0]["value"]
+    exact_name = suggestions[0]["value"]
+    multi_match_note = None
+    if len(suggestions) > 1:
+        multi_match_note = (
+            f"{len(suggestions)} vendors matched '{vendor_name}'. Picked the one "
+            f"with the most rate records ({suggestions[0].get('count')}). If this "
+            f"isn't the intended vendor, pass a more specific term."
+        )
 
     # Step 2: pull all rates for that vendor
     qs = _build_query_string(
         search_field="vendor_name", search_value=exact_name,
-        page=1, page_size=page_size, ordering="labor_category", sort="asc",
+        page=1, page_size=page_size, ordering=ordering, sort=sort,
     )
     data = await _get(qs)
 
-    hits = data.get("hits", {}).get("hits", [])
-    rates = []
-    for h in hits:
-        src = h.get("_source", {})
+    hits_list = _as_list(_safe_dict(data.get("hits")).get("hits"))
+    rates: list[dict[str, Any]] = []
+    for h in hits_list:
+        if not isinstance(h, dict):
+            continue
+        src = _safe_dict(h.get("_source"))
         rates.append({
             "labor_category": src.get("labor_category"),
-            "current_price": src.get("current_price"),
-            "next_year_price": src.get("next_year_price"),
+            "current_price": _safe_number(src.get("current_price")),
+            "next_year_price": _safe_number(src.get("next_year_price")),
             "education_level": src.get("education_level"),
             "min_years_experience": src.get("min_years_experience"),
             "sin": src.get("sin"),
@@ -547,19 +967,33 @@ async def vendor_rate_card(
             "business_size": src.get("business_size"),
         })
 
-    total = data.get("hits", {}).get("total", {}).get("value", 0)
-    return {
+    hits_total = _safe_dict(data.get("hits")).get("total")
+    if isinstance(hits_total, dict):
+        total = hits_total.get("value", 0)
+    elif isinstance(hits_total, int):
+        total = hits_total
+    else:
+        total = 0
+
+    response: dict[str, Any] = {
         "vendor": exact_name,
         "total_categories": total,
         "returned": len(rates),
         "rates": rates,
         "_stats": _extract_stats(data),
     }
+    if multi_match_note:
+        response["_note"] = multi_match_note
+        response["_candidates"] = [
+            {"value": s.get("value"), "count": s.get("count")}
+            for s in suggestions[:10]
+        ]
+    return response
 
 
 @mcp.tool()
 async def sin_analysis(
-    sin_code: str,
+    sin_code: Union[str, int],
     page_size: int = 100,
 ) -> dict[str, Any]:
     """Get rate distribution and statistics for a specific SIN.
@@ -575,10 +1009,12 @@ async def sin_analysis(
     - 541512: Computer Systems Design
     - 611430: Training
     """
-    if not sin_code or not sin_code.strip():
+    sin_code = _validate_sin(sin_code)
+    if sin_code is None:
         raise ValueError("sin_code cannot be empty.")
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
 
-    filters = [f"sin:{sin_code.strip()}"]
+    filters = [f"sin:{sin_code}"]
     qs = _build_query_string(
         filters=filters, page=1, page_size=page_size,
         ordering="current_price", sort="asc",

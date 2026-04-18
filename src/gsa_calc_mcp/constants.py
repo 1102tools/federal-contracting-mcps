@@ -4,7 +4,7 @@
 
 BASE_URL = "https://api.gsa.gov/acquisition/calc/v3/api/ceilingrates/"
 DEFAULT_TIMEOUT = 15.0
-USER_AGENT = "gsa-calc-mcp/0.1.1"
+USER_AGENT = "gsa-calc-mcp/0.2.0"
 
 MAX_PAGE_SIZE = 500
 RATE_LIMIT_PER_HOUR = 1000
@@ -29,7 +29,13 @@ ORDERING_FIELDS = [
     "vendor_name",
     "education_level",
     "min_years_experience",
+    "next_year_price",
+    "idv_piid",
+    "business_size",
 ]
+
+# Worksite enum values per GSA CALC+ API
+WORKSITE_VALUES = {"Customer", "Contractor", "Both"}
 
 COMMON_SINS: dict[str, str] = {
     "54151S": "IT Professional Services",
