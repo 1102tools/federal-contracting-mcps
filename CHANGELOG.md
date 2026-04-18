@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1
+
+Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
+
+- FastMCP tools register pydantic argument models with the default
+  `extra='ignore'` config, so a typo like
+  `search_awards(keyword='cyber')` (real param is `search_text`)
+  silently dropped the typo'd argument and returned unfiltered data.
+  Now every tool has `extra='forbid'` applied after registration, so
+  typos raise "Extra inputs are not permitted" before any HTTP call.
+- USER_AGENT bumped to `usaspending-gov-mcp/0.2.1`.
+- Added regression test covering the new behavior.
+
 ## 0.2.0
 
 Hardening release. Found via integration stress testing through a real MCP client (not raw coroutine awaits), which surfaced 28+ issues invisible to the prior unit tests.

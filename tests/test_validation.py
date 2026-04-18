@@ -319,3 +319,21 @@ def test_live_smoke_all_in_one_loop():
         assert "Defense" in p4.get("name", "") or p4.get("toptier_code") == "097"
 
     asyncio.run(run_all())
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "search_awards", {"search_text": "cyber", "bogus_typo": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())
