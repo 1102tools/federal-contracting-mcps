@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sam-gov-mcp"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server for SAM.gov entity registration, exclusion, contract opportunity, and contract award data"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,12 @@ Issues = "https://github.com/1102tools/sam-gov-mcp/issues"
 
 [project.scripts]
 sam-gov-mcp = "sam_gov_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sam_gov_mcp"]
