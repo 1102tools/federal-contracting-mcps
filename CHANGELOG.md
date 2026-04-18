@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.2.2
+
+Live audit with a real BLS API key surfaced 1 P0 usability bug and 10 P1
+silent-wrong-data paths that the 0.2.0 / 0.2.1 mocked rounds never caught.
+
+### Usability (P0)
+- `occ_code` validator previously rejected the **standard BLS SOC format**
+  `15-1252` with "must contain only ASCII digits." Users pasting codes
+  directly from bls.gov/soc, BLS publications, or procurement documents
+  hit a hard error on every lookup; only the un-dashed `151252` worked.
+  Now both forms are accepted and normalized: the dash is stripped
+  before validation. Verified live: `occ_code="15-1252"` returns
+  Software Developers mean wage $144,570.
+
+### Silent-wrong-data (P1)
+- `year` validator allowed 1997-2100, but the BLS OEWS **public API only
+  serves the current year** (2024). Asking for 2023 or 2015 returned
+  empty rows that the tool reported as `"suppressed": true` -- making it
+  look like BLS was censoring the cell for privacy when really the API
+  just doesn't serve historical data. Year range now tightened to
+  current ± 1, with a clear error pointing users to
+  bls.gov/oes/tables.htm for historical data.
+- Nonexistent SOC codes (e.g. `99-9999`) returned 4 wage fields all
+  flagged `"suppressed": true` with no indication the SOC was fake.
+  `igce_wage_benchmark` happily returned a benchmarks table with
+  `occ_title: "99-9999"` as if that were the real name. Now every
+  `get_wage_data` response includes `no_data: true` + `no_data_reason`
+  when all wage values are null, listing the common causes (SOC typo /
+  retired code / unsurveyed area + industry).
+- `igce_wage_benchmark` now also carries that `no_data` flag up, and
+  emits `_title_warning` when the SOC isn't in the built-in title
+  lookup (so typos like `99-9999` get called out explicitly).
+- Nonexistent state FIPS (`"99"`), metro MSA (`"99999"`), or NAICS
+  industry (`"999999"`) all used to return silently-suppressed fields.
+  Now flagged with the same `no_data` + `no_data_reason` payload.
+- `compare_metros` accepted 2-digit state FIPS mixed into the
+  `metro_codes` list. After normalization these became valid-looking
+  7-digit series components but silently returned zero results. Now
+  raises ValueError: "looks like a 2-digit state FIPS" and points at
+  `compare_occupations(scope='state')` instead.
+
+### Validation (P2)
+- Single-digit state FIPS (CA=`6`, AK=`2`, etc.) now auto-pads to two
+  digits. Previously rejected as "unrecognized area code (length 1)."
+  Users commonly know FIPS as `6` not `06`.
+- Control characters (`\n`, `\r`, `\t`, `\x00`) in `occ_code` are now
+  rejected up front. Previously `strip()` ate the newline and the
+  remaining digits validated fine.
+- `OEWS_LATEST_FUTURE_YEAR` dropped from 2100 to `OEWS_CURRENT_YEAR+1`
+  so years that will never have data are rejected at validation time.
+
+### Release automation
+- USER_AGENT bumped to `bls-oews-mcp/0.2.2`.
+- 12 new regression tests covering every round-1 finding.
+
 ## 0.2.1
 
 Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.

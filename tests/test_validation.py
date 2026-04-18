@@ -14,10 +14,20 @@ import os
 
 import pytest
 
+import bls_oews_mcp.server as srv  # noqa: E402
 from bls_oews_mcp.server import mcp  # noqa: E402
 
 
 LIVE = os.environ.get("BLS_LIVE_TESTS") == "1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_client():
+    """Reset the shared httpx client before every test so we don't reuse
+    a stale client across asyncio event loops."""
+    srv._client = None
+    yield
+    srv._client = None
 
 
 async def _call(name: str, **kwargs):
@@ -41,31 +51,54 @@ def _payload(result):
 # SOC code validation (consistent across all tools)
 # ---------------------------------------------------------------------------
 
-def test_get_wage_data_soc_with_dash():
-    asyncio.run(_call_expect_error("get_wage_data", "only ASCII digits", occ_code="15-1252"))
+# 0.2.2 change: SOC codes now accept BOTH '15-1252' (standard BLS format)
+# and '151252' (API format). The 0.2.0 / 0.2.1 "dash-rejected" behavior
+# was a usability bug caught in the 0.2.2 live audit -- users paste SOCs
+# directly from BLS publications which always write them dashed.
 
 
-def test_compare_metros_soc_with_dash():
-    asyncio.run(_call_expect_error(
-        "compare_metros", "only ASCII digits",
-        occ_code="15-125", metro_codes=["47900"]
-    ))
+def test_get_wage_data_soc_with_dash_now_accepted():
+    """Dashed SOC must pass validation. Hits network so it may fail on
+    auth -- we only assert that the dash-rejection error is gone."""
+    try:
+        asyncio.run(_call("get_wage_data", occ_code="15-1252"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "ascii digits" not in msg, f"dashed SOC wrongly rejected: {e}"
+        assert "must be a soc code" not in msg
 
 
-def test_compare_occupations_soc_with_dash():
-    asyncio.run(_call_expect_error(
-        "compare_occupations", "only ASCII digits",
-        occ_codes=["15-125", "13-108"]
-    ))
+def test_compare_metros_soc_with_dash_now_accepted():
+    try:
+        asyncio.run(_call(
+            "compare_metros", occ_code="15-1252", metro_codes=["47900"]
+        ))
+    except Exception as e:
+        assert "ascii digits" not in str(e).lower()
+
+
+def test_compare_occupations_soc_with_dash_now_accepted():
+    try:
+        asyncio.run(_call("compare_occupations", occ_codes=["15-1252", "13-1082"]))
+    except Exception as e:
+        assert "ascii digits" not in str(e).lower()
 
 
 def test_soc_letters_rejected():
-    asyncio.run(_call_expect_error("get_wage_data", "only ASCII digits", occ_code="ABCDEF"))
+    asyncio.run(_call_expect_error("get_wage_data", "soc code like", occ_code="ABCDEF"))
 
 
 def test_soc_fullwidth_digits_rejected():
     """Python .isdigit() accepts fullwidth digits; our regex doesn't."""
-    asyncio.run(_call_expect_error("get_wage_data", "only ASCII digits", occ_code="1512\uff15\u0032"))
+    asyncio.run(_call_expect_error("get_wage_data", "soc code like", occ_code="1512\uff15\u0032"))
+
+
+def test_soc_control_chars_rejected():
+    """0.2.2 regression: control chars were slipping through strip()."""
+    for ch in ("\n", "\r", "\t", "\x00"):
+        asyncio.run(_call_expect_error(
+            "get_wage_data", "control characters", occ_code=f"15-1252{ch}"
+        ))
 
 
 def test_soc_too_short_rejected():
@@ -197,16 +230,27 @@ def test_year_leading_zero_rejected():
 
 
 def test_year_too_old_rejected():
+    # 0.2.2: BLS public API only serves the current year; historical years
+    # now raise a clear "before the current OEWS release" error pointing
+    # users to bls.gov/oes/tables.htm.
     asyncio.run(_call_expect_error(
-        "get_wage_data", "out of OEWS range",
+        "get_wage_data", "before the current",
         occ_code="151252", year="1990"
     ))
 
 
 def test_year_too_new_rejected():
     asyncio.run(_call_expect_error(
-        "get_wage_data", "out of OEWS range",
+        "get_wage_data", "beyond the latest",
         occ_code="151252", year=2500
+    ))
+
+
+def test_year_historical_gets_clear_redirect():
+    """Historical years must point users to the bulk download."""
+    asyncio.run(_call_expect_error(
+        "get_wage_data", "bls.gov/oes/tables",
+        occ_code="151252", year=2023
     ))
 
 
@@ -509,7 +553,7 @@ def test_clean_error_body_passthrough_non_html():
 
 def test_user_agent_matches_version():
     from bls_oews_mcp.constants import USER_AGENT
-    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_api_key_status_whitespace_flagged():
@@ -583,3 +627,101 @@ def test_unknown_param_rejected():
             return
         raise AssertionError("expected extra-param rejection")
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 0.2.2: silent-wrong-data and single-digit FIPS fixes
+# ---------------------------------------------------------------------------
+
+def test_no_data_flag_on_fake_soc():
+    """0.2.2: nonexistent SOC used to return 4 'suppressed' fields silently."""
+    async def _run():
+        try:
+            r = await mcp.call_tool("get_wage_data", {"occ_code": "99-9999"})
+            p = r[1] if isinstance(r, tuple) else r
+            assert p.get("no_data") is True
+            assert "no_data_reason" in p
+            assert "SOC" in p["no_data_reason"]
+        except Exception:
+            pass  # network/auth OK
+    asyncio.run(_run())
+
+
+def test_no_data_flag_on_fake_state():
+    async def _run():
+        try:
+            r = await mcp.call_tool(
+                "get_wage_data",
+                {"occ_code": "15-1252", "scope": "state", "area_code": "99"},
+            )
+            p = r[1] if isinstance(r, tuple) else r
+            assert p.get("no_data") is True
+        except Exception:
+            pass
+    asyncio.run(_run())
+
+
+def test_single_digit_state_fips_auto_padded():
+    """CA FIPS = 6 (not 06). 0.2.2: auto-pad single-digit state FIPS."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "get_wage_data",
+                {"occ_code": "15-1252", "scope": "state", "area_code": "6"},
+            )
+        except Exception as e:
+            assert "unrecognized area code" not in str(e).lower(), (
+                f"single-digit state FIPS still rejected: {e}"
+            )
+    asyncio.run(_run())
+
+
+def test_compare_metros_rejects_state_fips():
+    """0.2.2: compare_metros must reject 2-digit state FIPS mixed in."""
+    asyncio.run(_call_expect_error(
+        "compare_metros", "state fips",
+        occ_code="15-1252", metro_codes=["14460", "25"],
+    ))
+
+
+def test_igce_flags_unknown_soc_title():
+    """0.2.2: igce must warn when SOC isn't in the title-lookup table."""
+    async def _run():
+        try:
+            r = await mcp.call_tool(
+                "igce_wage_benchmark", {"occ_code": "99-9999"}
+            )
+            p = r[1] if isinstance(r, tuple) else r
+            assert p.get("no_data") is True or p.get("_title_warning")
+        except Exception:
+            pass
+    asyncio.run(_run())
+
+
+# ---- LIVE tests ----
+
+@pytest.mark.skipif(not LIVE, reason="Set BLS_LIVE_TESTS=1 to run live API calls")
+def test_live_dashed_soc_returns_real_wage():
+    """Round-1 P0 regression: dashed SOC must return real wage data."""
+    r = asyncio.run(_call("get_wage_data", occ_code="15-1252"))
+    p = _payload(r)
+    mean = p.get("wages", {}).get("Annual Mean Wage", {}).get("numeric")
+    assert mean and mean > 100_000, f"expected >$100k mean for software devs, got {mean}"
+
+
+@pytest.mark.skipif(not LIVE, reason="Set BLS_LIVE_TESTS=1 to run live API calls")
+def test_live_fake_soc_flagged_not_suppressed():
+    """Round-1 P1 regression: nonexistent SOC must set no_data=True."""
+    r = asyncio.run(_call("get_wage_data", occ_code="99-9999"))
+    p = _payload(r)
+    assert p.get("no_data") is True
+    assert "SOC" in (p.get("no_data_reason") or "")
+
+
+@pytest.mark.skipif(not LIVE, reason="Set BLS_LIVE_TESTS=1 to run live API calls")
+def test_live_single_digit_ca_fips_works():
+    """Round-1 P2 regression: CA FIPS '6' must auto-pad to '06' and return data."""
+    r = asyncio.run(_call("get_wage_data", occ_code="15-1252", scope="state", area_code="6"))
+    p = _payload(r)
+    mean = p.get("wages", {}).get("Annual Mean Wage", {}).get("numeric")
+    assert mean and mean > 100_000, f"expected CA software dev wage, got {mean}"

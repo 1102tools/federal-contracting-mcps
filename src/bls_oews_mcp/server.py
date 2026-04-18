@@ -54,8 +54,12 @@ _DATATYPE_RE = re.compile(r"^[0-9]{2}$")
 _YEAR_RE = re.compile(r"^[0-9]{4}$")
 
 # OEWS data is available from 1997 onward (earliest published year).
+# IMPORTANT: The BLS OEWS public API only serves the **latest** data year.
+# Requesting a historical year returns empty rows with no error, which is why
+# OEWS_LATEST_FUTURE_YEAR tightly hugs the current release. To get historical
+# OEWS data, users must download tables from bls.gov/oes/tables.htm.
 OEWS_EARLIEST_YEAR = 1997
-OEWS_LATEST_FUTURE_YEAR = 2100  # generous upper bound
+OEWS_LATEST_FUTURE_YEAR = int(OEWS_CURRENT_YEAR) + 1
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -100,8 +104,45 @@ def _coerce_str_digits(value: Any, *, field: str, length: int | None = None) -> 
 
 
 def _validate_soc(value: Any, *, field: str = "occ_code") -> str:
-    """Validate a SOC code: exactly 6 ASCII digits. No dash (use '151252' not '15-1252')."""
-    return _coerce_str_digits(value, field=field, length=6)
+    """Validate a SOC code. Accepts both '15-1252' (standard BLS format) and
+    '151252' (API format); the dash is stripped before validation.
+
+    Returns the un-dashed 6-digit form that the BLS API expects.
+    """
+    if value is None:
+        raise ValueError(f"{field} cannot be None.")
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer or digit-string, not bool.")
+    if isinstance(value, int):
+        s = str(value)
+    elif isinstance(value, str):
+        # Reject control chars before strip() eats them.
+        if any(c in value for c in ("\x00", "\n", "\r", "\t")):
+            raise ValueError(
+                f"{field}={value!r} contains control characters. "
+                f"SOC codes are 6 digits with an optional single dash: '15-1252'."
+            )
+        # SOC codes are officially written as XX-XXXX. Strip the dash so users
+        # can paste "15-1252" directly from BLS publications.
+        s = value.strip().replace("-", "")
+    else:
+        raise ValueError(
+            f"{field} must be an integer or string. Got {type(value).__name__}."
+        )
+    if not s:
+        raise ValueError(f"{field} cannot be empty.")
+    if not _ASCII_DIGITS_RE.match(s):
+        raise ValueError(
+            f"{field}={value!r} must be a SOC code like '15-1252' or '151252' "
+            f"(6 ASCII digits, optional single dash after the first 2). "
+            f"No letters, whitespace, or Unicode digits."
+        )
+    if len(s) != 6:
+        raise ValueError(
+            f"{field}={value!r} must be exactly 6 digits (got {len(s)}). "
+            f"SOC codes are 'XX-XXXX' format, e.g. '15-1252' (Software Developers)."
+        )
+    return s
 
 
 def _validate_industry(value: Any, *, field: str = "industry") -> str:
@@ -121,7 +162,14 @@ def _validate_datatype(value: Any, *, field: str = "datatype") -> str:
 
 
 def _validate_year(value: Any, *, field: str = "year") -> str:
-    """Validate a 4-digit year in OEWS range. Accepts int or str (stripped)."""
+    """Validate a 4-digit year. Accepts int or str (stripped).
+
+    The BLS OEWS public API only serves the **current** data year (see
+    OEWS_LATEST_FUTURE_YEAR comment above). Requesting older years
+    silently returns empty rows that look like privacy-suppressed cells.
+    Pre-reject out-of-range years AND years before current with a clear
+    message pointing users to the bulk-download alternative.
+    """
     if value is None:
         return str(OEWS_CURRENT_YEAR)
     if isinstance(value, bool):
@@ -140,11 +188,19 @@ def _validate_year(value: Any, *, field: str = "year") -> str:
             f"Decimals, whitespace, and leading zeros beyond 4 digits are rejected."
         )
     y = int(s)
-    if y < OEWS_EARLIEST_YEAR or y > OEWS_LATEST_FUTURE_YEAR:
+    if y > OEWS_LATEST_FUTURE_YEAR:
         raise ValueError(
-            f"{field}={y} is out of OEWS range. "
-            f"Valid years: {OEWS_EARLIEST_YEAR}..{OEWS_LATEST_FUTURE_YEAR}. "
-            f"OEWS data currently lags ~2 years; default is {OEWS_CURRENT_YEAR}."
+            f"{field}={y} is beyond the latest OEWS release ({OEWS_CURRENT_YEAR}). "
+            f"Future years return empty from the BLS API. "
+            f"Omit the year or pass {OEWS_CURRENT_YEAR}."
+        )
+    if y < int(OEWS_CURRENT_YEAR):
+        raise ValueError(
+            f"{field}={y} is before the current OEWS release. "
+            f"The BLS OEWS public API only serves the latest year "
+            f"({OEWS_CURRENT_YEAR}); historical years silently return empty "
+            f"rows. For historical OEWS data, download from "
+            f"bls.gov/oes/tables.htm. Omit the year argument to get current data."
         )
     return s
 
@@ -353,10 +409,13 @@ def _normalize_area(area_input: Any) -> str:
         return f"00{area}"
     if len(area) == 2:
         return f"{area}00000"
+    if len(area) == 1:
+        # Single-digit state FIPS (CA=6, AK=2, etc.) — auto-pad.
+        return f"0{area}00000"
     raise ValueError(
         f"Unrecognized area code '{area}' (length {len(area)}). "
-        "Expected: 2-digit state FIPS (e.g., '51'), 5-digit MSA (e.g., '47900'), "
-        "or 7-digit full code (e.g., '0047900')."
+        "Expected: 1-2 digit state FIPS (e.g., '6' for CA, '51' for VA), "
+        "5-digit MSA (e.g., '47900'), or 7-digit full code (e.g., '0047900')."
     )
 
 
@@ -543,6 +602,27 @@ async def get_wage_data(
         "industry": industry,
         "wages": results,
     }
+
+    # Flag no-data / all-suppressed cases so callers don't interpret
+    # "suppressed: true" as "BLS suppressed this for privacy." Most of the
+    # time the real cause is an unknown SOC, nonexistent area/industry code,
+    # or a SOC that isn't surveyed in that area.
+    wage_values = [
+        v for v in results.values()
+        if isinstance(v, dict) and v.get("numeric") is not None
+    ]
+    if results and not wage_values:
+        response["no_data"] = True
+        response["no_data_reason"] = (
+            f"BLS returned no wage values for occ_code={occ_code} "
+            f"scope={scope} area_code={area_code!r} industry={industry}. "
+            f"Likely causes: (1) the SOC code does not exist or was recently "
+            f"retired, (2) the area/industry combo has no observations, or "
+            f"(3) the SOC is not surveyed at this geographic level. Verify "
+            f"the SOC at bls.gov/soc and the area/industry codes before "
+            f"treating this as a real suppression."
+        )
+
     if scope == "national" and area_code is not None:
         response["_note"] = (
             f"area_code={area_code!r} was ignored because scope='national'. "
@@ -590,6 +670,19 @@ async def compare_metros(
     metro_labels: dict[str, str] = {}
     for code in deduped:
         area = _normalize_area(code)
+        # Reject state-FIPS-sized inputs in a metros-only context: after
+        # normalization a 2-digit state FIPS becomes 'NN00000' which is a
+        # valid-looking 7-digit series component, but it means the national
+        # state record, not a metro. That silently produces zero-result
+        # series. Enforce that metro_codes look like metros.
+        if area.startswith("00") and area[2:].count("0") < 4:
+            pass  # 00NNNNN = real MSA, padded
+        elif area.endswith("00000"):
+            raise ValueError(
+                f"metro_codes[{code!r}] looks like a 2-digit state FIPS. "
+                f"compare_metros requires MSA codes (5 or 7 digits). "
+                f"For states, use compare_occupations with scope='state' instead."
+            )
         sid = _build_series_id("OEUM", area, "000000", occ_code, datatype)
         series_ids.append(sid)
         metro_labels[sid] = str(code).strip()
@@ -614,6 +707,18 @@ async def compare_metros(
         "datatype": DATATYPE_LABELS.get(datatype, datatype),
         "metros": metros,
     }
+    # Flag the all-no-data case: every metro returned empty.
+    metros_with_values = [
+        v for v in metros.values()
+        if isinstance(v, dict) and v.get("numeric") is not None
+    ]
+    if metros and not metros_with_values:
+        response["no_data"] = True
+        response["no_data_reason"] = (
+            f"No BLS data for occ_code={occ_code} across any of the requested "
+            f"metros. Likely cause: the SOC code does not exist, is retired, "
+            f"or is not surveyed at MSA level. Verify the SOC at bls.gov/soc."
+        )
     if data.get("_partial"):
         response["_partial"] = True
         response["_warnings"] = data.get("_warnings", [])
@@ -769,9 +874,14 @@ async def igce_wage_benchmark(
         else:
             benchmarks[label] = {"annual": entry.get("formatted", "No data"), "suppressed": True}
 
-    return {
+    # Look up occ_title. Our lookup table uses the un-dashed 6-digit form.
+    normalized_soc = str(occ_code).replace("-", "").strip()
+    occ_title_lookup = COMMON_SOC_CODES.get(normalized_soc)
+    title_is_lookup_miss = occ_title_lookup is None
+
+    response: dict[str, Any] = {
         "occ_code": occ_code,
-        "occ_title": COMMON_SOC_CODES.get(occ_code, occ_code),
+        "occ_title": occ_title_lookup or occ_code,
         "scope": scope,
         "area_code": area_code,
         "data_year": wages.get("_data_year", OEWS_CURRENT_YEAR),
@@ -779,6 +889,20 @@ async def igce_wage_benchmark(
         "benchmarks": benchmarks,
         "_note": "BLS wages are base wages only (no fringe/overhead/G&A/profit). Burdened rates are estimates.",
     }
+
+    # Propagate the no_data flag from the underlying wage_data call so the
+    # caller knows the benchmarks are all zero-value, not real suppressions.
+    if wage_data.get("no_data"):
+        response["no_data"] = True
+        response["no_data_reason"] = wage_data.get("no_data_reason")
+    if title_is_lookup_miss:
+        response["_title_warning"] = (
+            f"occ_code={occ_code!r} was not found in the built-in SOC title "
+            f"lookup. Verify the code at bls.gov/soc before relying on the "
+            f"benchmark -- typos or retired SOCs produce all-zero benchmarks."
+        )
+
+    return response
 
 
 @mcp.tool()
