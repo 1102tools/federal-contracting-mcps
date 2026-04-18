@@ -11,7 +11,9 @@ changing, what has changed, and what comment periods are open.
 
 from __future__ import annotations
 
+import re
 import urllib.parse
+from datetime import date
 from typing import Any, Literal
 
 import httpx
@@ -26,6 +28,134 @@ from .constants import (
 )
 
 mcp = FastMCP("federal-register")
+
+
+# ---------------------------------------------------------------------------
+# Validators
+# ---------------------------------------------------------------------------
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EARLIEST_FR_DATE = "1994-01-01"
+
+
+def _validate_date(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not _DATE_RE.match(value):
+        raise ValueError(
+            f"{field_name} must be in YYYY-MM-DD format (e.g. '2026-01-15'). "
+            f"Got {value!r}. ISO 8601 datetimes and 'YYYY/MM/DD' are rejected."
+        )
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name}={value!r} is not a valid calendar date: {exc}") from exc
+    return value
+
+
+def _clamp(value: int, *, field: str, lo: int, hi: int) -> int:
+    if value < lo:
+        raise ValueError(f"{field} must be >= {lo}. Got {value}.")
+    if value > hi:
+        raise ValueError(
+            f"{field} exceeds maximum of {hi}. Got {value}. Paginate with 'page' instead."
+        )
+    return value
+
+
+def _reject_empty_list(value: list[Any] | None, field: str) -> list[Any] | None:
+    if value is None:
+        return None
+    if len(value) == 0:
+        raise ValueError(
+            f"{field}=[] is silently ignored by the API (matches everything). "
+            f"Omit {field} entirely to search without it."
+        )
+    return value
+
+
+def _check_date_range(gte: str | None, lte: str | None, field_pair: str) -> None:
+    if gte and lte and gte > lte:
+        raise ValueError(
+            f"{field_pair}: gte ({gte}) is after lte ({lte}). "
+            f"Check parameter order (gte = start / lte = end)."
+        )
+
+
+def _strip_or_none(value: str | None) -> str | None:
+    """Normalize whitespace-only strings to None. Trim leading/trailing space."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def _require_min_length(value: str, *, field: str, minimum: int) -> str:
+    stripped = value.strip()
+    if len(stripped) < minimum:
+        raise ValueError(
+            f"{field} must be at least {minimum} characters after trimming whitespace. "
+            f"Got {value!r} ({len(stripped)} chars). Short queries match too broadly "
+            f"and return unrelated results."
+        )
+    return stripped
+
+
+def _clamp_str_len(value: str | None, *, field: str, maximum: int) -> str | None:
+    if value is None:
+        return None
+    if len(value) > maximum:
+        raise ValueError(
+            f"{field} exceeds maximum length of {maximum} chars. "
+            f"Got {len(value)}. Very long query strings cause HTTP 414 errors."
+        )
+    return value
+
+
+_DOC_NUMBER_RE = re.compile(r"^(?:C\d-)?\d{4}-\d{5}$")
+
+
+def _validate_doc_number(value: str, *, field: str = "document_number") -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError(f"{field} cannot be empty.")
+    if not _DOC_NUMBER_RE.match(stripped):
+        raise ValueError(
+            f"{field}={value!r} has invalid format. "
+            f"Expected 'YYYY-NNNNN' (e.g. '2026-07731') or 'CN-YYYY-NNNNN' for corrections."
+        )
+    return stripped
+
+
+def _warn_pre_fr_date(value: str | None, field: str) -> str | None:
+    """Dates before 1994 return nothing useful; reject with actionable message."""
+    if value is None:
+        return None
+    if value < _EARLIEST_FR_DATE:
+        raise ValueError(
+            f"{field}={value!r} predates the Federal Register API (earliest date: "
+            f"{_EARLIEST_FR_DATE}). The API will return empty results for pre-1994 dates."
+        )
+    return value
+
+
+_HTML_ERROR_RE = re.compile(r"<(?:!doctype|html)", re.IGNORECASE)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+
+
+def _clean_error_body(text: str) -> str:
+    """Strip HTML from upstream error bodies so error messages stay readable."""
+    if not _HTML_ERROR_RE.search(text):
+        return text[:400]
+    pieces: list[str] = []
+    title = _TITLE_RE.search(text)
+    if title:
+        pieces.append(title.group(1).strip())
+    h1 = _H1_RE.search(text)
+    if h1 and (not title or h1.group(1).strip() != title.group(1).strip()):
+        pieces.append(h1.group(1).strip())
+    return " - ".join(pieces) if pieces else "upstream returned HTML error page"
 
 
 # ---------------------------------------------------------------------------
@@ -46,20 +176,27 @@ def _get_client() -> httpx.AsyncClient:
 
 
 def _format_error(status: int, body: str) -> str:
+    cleaned = _clean_error_body(body)
     if status == 404:
         return (
-            f"HTTP 404: Document not found. Verify the document_number is correct. "
-            f"API response: {body[:300]}"
+            f"HTTP 404: Resource not found. For get_document/get_documents_batch, "
+            f"verify the document_number. For other endpoints the path may be invalid. "
+            f"API response: {cleaned}"
+        )
+    if status == 414:
+        return (
+            f"HTTP 414: Request URI too long. "
+            f"Shorten long query strings (term, docket_id, regulation_id_number)."
         )
     if status == 422:
         return (
             f"HTTP 422: Invalid parameters. Check agency slugs, document type codes "
             f"(PRORULE, RULE, NOTICE, PRESDOCU), date formats (YYYY-MM-DD), "
-            f"and field names. API response: {body[:300]}"
+            f"and field names. API response: {cleaned}"
         )
     if status == 429:
         return "HTTP 429: Rate limited. Add delays between requests."
-    return f"HTTP {status}: {body[:400]}"
+    return f"HTTP {status}: {cleaned}"
 
 
 async def _get(url: str) -> Any:
@@ -178,7 +315,27 @@ async def search_documents(
     - significant: True for EO 12866 significant rules only
 
     Count caps at 10,000 for broad queries. Use date ranges for accurate counts.
+    per_page capped at 100 to stay within MCP response size limits.
     """
+    agencies = _reject_empty_list(agencies, "agencies")
+    doc_types = _reject_empty_list(doc_types, "doc_types")
+    per_page = _clamp(per_page, field="per_page", lo=1, hi=100)
+    page = _clamp(page, field="page", lo=1, hi=10_000)
+    term = _clamp_str_len(_strip_or_none(term), field="term", maximum=500)
+    docket_id = _clamp_str_len(_strip_or_none(docket_id), field="docket_id", maximum=200)
+    regulation_id_number = _clamp_str_len(
+        _strip_or_none(regulation_id_number), field="regulation_id_number", maximum=50
+    )
+    pub_date_gte = _warn_pre_fr_date(_validate_date(pub_date_gte, "pub_date_gte"), "pub_date_gte")
+    pub_date_lte = _validate_date(pub_date_lte, "pub_date_lte")
+    comment_date_gte = _validate_date(comment_date_gte, "comment_date_gte")
+    comment_date_lte = _validate_date(comment_date_lte, "comment_date_lte")
+    effective_date_gte = _validate_date(effective_date_gte, "effective_date_gte")
+    effective_date_lte = _validate_date(effective_date_lte, "effective_date_lte")
+    _check_date_range(pub_date_gte, pub_date_lte, "publication_date")
+    _check_date_range(comment_date_gte, comment_date_lte, "comment_date")
+    _check_date_range(effective_date_gte, effective_date_lte, "effective_date")
+
     qs = _build_search_params(
         agencies=agencies, doc_types=doc_types, term=term,
         docket_id=docket_id, regulation_id_number=regulation_id_number,
@@ -202,9 +359,7 @@ async def get_document(
 
     Document numbers look like '2026-03065' or 'C1-2026-01234' (corrections).
     """
-    if not document_number or not document_number.strip():
-        raise ValueError("document_number cannot be empty.")
-    dn = document_number.strip()
+    dn = _validate_doc_number(document_number)
     return await _get(f"{BASE_URL}/documents/{dn}.json")
 
 
@@ -221,7 +376,9 @@ async def get_documents_batch(
     if len(document_numbers) > 20:
         raise ValueError(f"Max 20 documents per batch. Got {len(document_numbers)}.")
 
-    nums = ",".join(d.strip() for d in document_numbers)
+    validated = [_validate_doc_number(d, field=f"document_numbers[{i}]")
+                 for i, d in enumerate(document_numbers)]
+    nums = ",".join(validated)
     return await _get(f"{BASE_URL}/documents/{nums}.json")
 
 
@@ -241,7 +398,26 @@ async def get_facet_counts(
 
     Useful for understanding the volume of rulemaking by agency or type
     within a date range before drilling into specific documents.
+
+    At least one filter (agencies, doc_types, term, or pub_date_gte/lte) is
+    required. An unfiltered facet query returns the entire all-time aggregate.
     """
+    agencies = _reject_empty_list(agencies, "agencies")
+    doc_types = _reject_empty_list(doc_types, "doc_types")
+    term = _clamp_str_len(_strip_or_none(term), field="term", maximum=500)
+    pub_date_gte = _warn_pre_fr_date(
+        _validate_date(pub_date_gte, "pub_date_gte"), "pub_date_gte"
+    )
+    pub_date_lte = _validate_date(pub_date_lte, "pub_date_lte")
+    _check_date_range(pub_date_gte, pub_date_lte, "publication_date")
+
+    if not any([agencies, doc_types, term, pub_date_gte, pub_date_lte]):
+        raise ValueError(
+            "get_facet_counts requires at least one filter "
+            "(agencies, doc_types, term, or pub_date_gte/lte). "
+            "An unfiltered query returns all-time aggregates and is rarely useful."
+        )
+
     params: list[tuple[str, str]] = []
     if agencies:
         for a in agencies:
@@ -267,6 +443,7 @@ async def get_facet_counts(
 async def get_public_inspection(
     agency_filter: str | None = None,
     keyword_filter: str | None = None,
+    limit: int = 50,
 ) -> dict[str, Any]:
     """Get current public inspection documents (pre-publication).
 
@@ -278,7 +455,17 @@ async def get_public_inspection(
     slug and/or keyword in the title.
 
     Useful for getting early notice of upcoming regulatory actions.
+
+    Parameters:
+    - agency_filter: substring match against each document's agency slugs
+    - keyword_filter: substring match against document titles
+    - limit: max documents returned after filtering (default 50, max 500).
+      Unfiltered dumps can exceed 170KB; narrow with filters or raise the cap.
     """
+    limit = _clamp(limit, field="limit", lo=1, hi=500)
+    agency_filter = _strip_or_none(agency_filter)
+    keyword_filter = _strip_or_none(keyword_filter)
+
     data = await _get(f"{BASE_URL}/public-inspection-documents/current.json")
 
     results = data.get("results", [])
@@ -298,20 +485,30 @@ async def get_public_inspection(
             if kw_lower in (d.get("title") or "").lower()
         ]
 
+    total_matched = len(results)
+    truncated = total_matched > limit
+    results = results[:limit]
+
     return {
         "total_pi_documents": data.get("count", 0),
-        "filtered_count": len(results),
+        "filtered_count": total_matched,
+        "returned": len(results),
+        "truncated": truncated,
         "filters_applied": {
             "agency": agency_filter,
             "keyword": keyword_filter,
+            "limit": limit,
         },
         "documents": results,
     }
 
 
 @mcp.tool()
-async def list_agencies() -> dict[str, Any]:
-    """List all ~470 agencies with their IDs, names, slugs, and parent agencies.
+async def list_agencies(
+    query: str | None = None,
+    include_detail: bool = False,
+) -> dict[str, Any]:
+    """List agencies with their IDs, names, slugs, and parent agencies.
 
     Use the 'slug' values with search_documents() and other tools.
     Common procurement slugs:
@@ -322,8 +519,42 @@ async def list_agencies() -> dict[str, Any]:
     - small-business-administration (SBA)
     - national-aeronautics-and-space-administration (NASA)
     - veterans-affairs-department (VA)
+
+    Parameters:
+    - query: optional case-insensitive substring match against name, short_name,
+      and slug. Recommended: narrow results before pulling full detail.
+    - include_detail: if False (default), returns only id/name/short_name/slug/parent_id.
+      If True, returns all fields (description, urls, etc.). The full dump is ~700KB.
     """
-    return await _get(f"{BASE_URL}/agencies.json")
+    query = _strip_or_none(query)
+    data = await _get(f"{BASE_URL}/agencies.json")
+
+    if not isinstance(data, list):
+        raise RuntimeError(
+            f"Unexpected response shape from /agencies.json: {type(data).__name__}"
+        )
+
+    results = data
+    if query:
+        q = query.lower()
+        results = [
+            a for a in results
+            if q in (a.get("name") or "").lower()
+            or q in (a.get("short_name") or "").lower()
+            or q in (a.get("slug") or "").lower()
+        ]
+
+    if not include_detail:
+        slim_fields = ("id", "name", "short_name", "slug", "parent_id")
+        results = [{k: a.get(k) for k in slim_fields} for a in results]
+
+    return {
+        "total_agencies": len(data),
+        "returned": len(results),
+        "query": query,
+        "include_detail": include_detail,
+        "agencies": results,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +565,7 @@ async def list_agencies() -> dict[str, Any]:
 async def open_comment_periods(
     agencies: list[str] | None = None,
     term: str | None = None,
+    limit: int = 50,
 ) -> dict[str, Any]:
     """Find proposed rules and notices with currently open comment periods.
 
@@ -343,8 +575,14 @@ async def open_comment_periods(
     Default: searches all agencies. Pass agency slugs to narrow scope.
     Common for procurement: ['federal-procurement-policy-office',
     'defense-department', 'general-services-administration']
+
+    Parameters:
+    - limit: max documents returned (default 50, max 100).
+      Unfiltered dumps across all agencies can approach 200KB.
     """
-    from datetime import date
+    agencies = _reject_empty_list(agencies, "agencies")
+    limit = _clamp(limit, field="limit", lo=1, hi=100)
+
     today = date.today().isoformat()
 
     data = await search_documents(
@@ -352,7 +590,7 @@ async def open_comment_periods(
         doc_types=["PRORULE", "NOTICE"],
         term=term,
         comment_date_gte=today,
-        per_page=100,
+        per_page=limit,
         order="newest",
     )
 
@@ -362,6 +600,7 @@ async def open_comment_periods(
     return {
         "as_of": today,
         "total_open": len(results),
+        "limit": limit,
         "documents": results,
     }
 
@@ -379,19 +618,22 @@ async def far_case_history(docket_id: str) -> dict[str, Any]:
 
     If the docket_id filter returns 0 results, the tool automatically
     retries with a term search (quoted phrase) as fallback.
+
+    Minimum docket_id length is 3 characters to prevent substring matches that
+    return unrelated documents (e.g. 'x' matched 65 random dockets in 0.1.x).
     """
-    if not docket_id or not docket_id.strip():
-        raise ValueError("docket_id cannot be empty.")
+    docket_id = _require_min_length(docket_id, field="docket_id", minimum=3)
+    docket_id = _clamp_str_len(docket_id, field="docket_id", maximum=200)
 
     data = await search_documents(
-        docket_id=docket_id.strip(),
+        docket_id=docket_id,
         per_page=100,
         order="oldest",
     )
 
     if data.get("count", 0) == 0:
         data = await search_documents(
-            term=f'"{docket_id.strip()}"',
+            term=f'"{docket_id}"',
             per_page=100,
             order="oldest",
         )
