@@ -330,7 +330,7 @@ def test_get_document_accepts_correction_prefix():
 
 def test_user_agent_version_matches():
     from federal_register_mcp.constants import USER_AGENT
-    assert "0.2.0" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_clean_error_body_strips_html():
@@ -393,3 +393,21 @@ def test_list_agencies_live_query_filter():
     payload = _payload(result)
     assert payload["returned"] > 0
     assert payload["returned"] < payload["total_agencies"]
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "search_documents", {"term": "acquisition", "bogus_typo": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())

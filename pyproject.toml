@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "federal-register-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for the Federal Register API. Proposed rules, final rules, notices, executive orders, and regulatory tracking."
 readme = "README.md"
 requires-python = ">=3.10"
