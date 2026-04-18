@@ -337,3 +337,129 @@ def test_unknown_param_rejected():
             return
         raise AssertionError("expected extra-param rejection")
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 0.2.2: live-audit fixes
+# ---------------------------------------------------------------------------
+
+def test_null_byte_in_keywords_rejected():
+    """Null byte in keywords used to silently reach the API."""
+    asyncio.run(_call_expect_error(
+        "search_awards", "control characters",
+        keywords=["abc\x00def"],
+    ))
+
+
+def test_newline_in_keywords_rejected():
+    asyncio.run(_call_expect_error(
+        "search_awards", "control characters",
+        keywords=["line1\nline2"],
+    ))
+
+
+def test_tab_in_keywords_rejected():
+    asyncio.run(_call_expect_error(
+        "search_awards", "control characters",
+        keywords=["col1\tcol2"],
+    ))
+
+
+def test_negative_amount_min_rejected():
+    """Negative min was silently ignored by USASpending."""
+    asyncio.run(_call_expect_error(
+        "search_awards", "must be >= 0",
+        award_amount_min=-1_000_000,
+    ))
+
+
+def test_negative_amount_max_rejected():
+    asyncio.run(_call_expect_error(
+        "search_awards", "must be >= 0",
+        award_amount_max=-1_000,
+    ))
+
+
+def test_all_empty_naics_rejected():
+    """naics_codes=['','',''] used to silently return unfiltered results."""
+    asyncio.run(_call_expect_error(
+        "search_awards", "contains only empty",
+        naics_codes=["", "", ""],
+    ))
+
+
+def test_single_empty_psc_rejected():
+    asyncio.run(_call_expect_error(
+        "search_awards", "contains only empty",
+        psc_codes=[""],
+    ))
+
+
+def test_single_empty_award_ids_rejected():
+    asyncio.run(_call_expect_error(
+        "search_awards", "contains only empty",
+        award_ids=[""],
+    ))
+
+
+def test_null_byte_in_autocomplete_psc_rejected():
+    """Null byte here used to produce HTTP 500 from the API."""
+    asyncio.run(_call_expect_error(
+        "autocomplete_psc", "control characters",
+        search_text="abc\x00",
+    ))
+
+
+def test_null_byte_in_autocomplete_naics_rejected():
+    asyncio.run(_call_expect_error(
+        "autocomplete_naics", "control characters",
+        search_text="abc\x00",
+    ))
+
+
+def test_null_byte_in_generated_award_id_rejected():
+    """Null byte in award ID used to cause HTTP 500."""
+    asyncio.run(_call_expect_error(
+        "get_transactions", "control characters",
+        generated_award_id="ABC\x00DEF",
+    ))
+
+
+def test_empty_generated_award_id_rejected_transactions():
+    asyncio.run(_call_expect_error(
+        "get_transactions", "cannot be empty",
+        generated_award_id="",
+    ))
+
+
+def test_empty_generated_award_id_rejected_funding():
+    asyncio.run(_call_expect_error(
+        "get_award_funding", "cannot be empty",
+        generated_award_id="",
+    ))
+
+
+def test_empty_generated_award_id_rejected_detail():
+    asyncio.run(_call_expect_error(
+        "get_award_detail", "cannot be empty",
+        generated_award_id="",
+    ))
+
+
+def test_empty_idv_id_rejected():
+    asyncio.run(_call_expect_error(
+        "get_idv_children", "cannot be empty",
+        generated_idv_id="",
+    ))
+
+
+def test_autocomplete_psc_length_clamped():
+    asyncio.run(_call_expect_error(
+        "autocomplete_psc", "exceeds 200 chars",
+        search_text="a" * 300,
+    ))
+
+
+def test_user_agent_matches_version():
+    from usaspending_gov_mcp.constants import USER_AGENT
+    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"

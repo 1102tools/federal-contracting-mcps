@@ -212,14 +212,50 @@ def _clamp_limit(limit: int, *, cap: int, field: str = "limit") -> int:
 
 
 def _coerce_code_list(codes: list[Any] | None, field: str) -> list[str] | None:
-    """Coerce a list of codes (int or str) to strings. Rejects empty arrays."""
+    """Coerce a list of codes (int or str) to strings. Rejects empty arrays
+    AND arrays where every entry is empty / whitespace-only."""
     if codes is None:
         return None
     if len(codes) == 0:
         raise ValueError(
             f"{field} was passed as an empty array. Omit the parameter instead of passing []."
         )
-    return [str(c).strip() for c in codes if str(c).strip()]
+    cleaned = [str(c).strip() for c in codes if str(c).strip()]
+    if not cleaned:
+        raise ValueError(
+            f"{field}={codes!r} contains only empty / whitespace strings. "
+            f"Pass non-empty codes or omit the parameter."
+        )
+    return cleaned
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f]")
+
+
+def _validate_no_control_chars(value: str | None, *, field: str) -> str | None:
+    """Reject null bytes, newlines, tabs, and other control characters.
+
+    USASpending's API either 500s on these (autocomplete, transactions) or
+    silently accepts them (keyword search), which makes tool results confusing.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    if _CONTROL_CHARS_RE.search(value):
+        raise ValueError(
+            f"{field}={value!r} contains control characters (null byte, newline, "
+            f"tab, etc). Remove them and retry."
+        )
+    return value
+
+
+def _validate_strings_no_control_chars(values: list[str] | None, *, field: str) -> None:
+    """Apply _validate_no_control_chars to each entry in a list."""
+    if values is None:
+        return
+    for i, v in enumerate(values):
+        _validate_no_control_chars(v, field=f"{field}[{i}]")
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +477,25 @@ async def search_awards(
     if page < 1:
         raise ValueError(f"page must be >= 1. Got {page}.")
 
+    # Reject control characters in free-text inputs. USASpending either
+    # 500s on these or silently treats them as whitespace, both bad UX.
+    _validate_strings_no_control_chars(keywords, field="keywords")
+    _validate_no_control_chars(awarding_agency, field="awarding_agency")
+    _validate_no_control_chars(awarding_subagency, field="awarding_subagency")
+    _validate_no_control_chars(funding_agency, field="funding_agency")
+    _validate_no_control_chars(recipient_name, field="recipient_name")
+    # Negative amounts silently return default results as if no filter.
+    if award_amount_min is not None and award_amount_min < 0:
+        raise ValueError(
+            f"award_amount_min must be >= 0. Got {award_amount_min}. "
+            f"Negative minimums are silently ignored by USASpending and "
+            f"return unfiltered results."
+        )
+    if award_amount_max is not None and award_amount_max < 0:
+        raise ValueError(
+            f"award_amount_max must be >= 0. Got {award_amount_max}."
+        )
+
     if award_type == "contracts":
         fields = list(DEFAULT_CONTRACT_FIELDS)
     elif award_type == "idvs":
@@ -522,6 +577,14 @@ async def get_award_count(
     At least one filter is required (the API rejects empty filter sets with HTTP 400).
     Typical usage: pass time_period_start + time_period_end, or a keywords/agency filter.
     """
+    _validate_strings_no_control_chars(keywords, field="keywords")
+    _validate_no_control_chars(awarding_agency, field="awarding_agency")
+    _validate_no_control_chars(recipient_name, field="recipient_name")
+    if award_amount_min is not None and award_amount_min < 0:
+        raise ValueError(f"award_amount_min must be >= 0. Got {award_amount_min}.")
+    if award_amount_max is not None and award_amount_max < 0:
+        raise ValueError(f"award_amount_max must be >= 0. Got {award_amount_max}.")
+
     filters = _build_filters(
         keywords=keywords,
         awarding_agency=awarding_agency,
@@ -571,6 +634,9 @@ async def spending_over_time(
     At least one filter is required (the API rejects empty filter sets with HTTP 400).
     Typical usage: pass time_period_start + time_period_end.
     """
+    _validate_strings_no_control_chars(keywords, field="keywords")
+    _validate_no_control_chars(awarding_agency, field="awarding_agency")
+    _validate_no_control_chars(recipient_name, field="recipient_name")
     award_type_codes = _resolve_award_type(award_type) if award_type else None
     filters = _build_filters(
         keywords=keywords,
@@ -633,6 +699,8 @@ async def spending_by_category(
     limit = _clamp_limit(limit, cap=100)
     if page < 1:
         raise ValueError(f"page must be >= 1. Got {page}.")
+    _validate_strings_no_control_chars(keywords, field="keywords")
+    _validate_no_control_chars(awarding_agency, field="awarding_agency")
     award_type_codes = _resolve_award_type(award_type) if award_type else None
     filters = _build_filters(
         keywords=keywords,
@@ -668,7 +736,13 @@ async def get_award_detail(generated_award_id: str) -> dict[str, Any]:
 
     Example generated_award_id format: CONT_AWD_N0002424C0085_9700_N0002421D0001_9700
     """
-    return await _get(f"/api/v2/awards/{generated_award_id}/")
+    if not isinstance(generated_award_id, str) or not generated_award_id.strip():
+        raise ValueError(
+            "generated_award_id cannot be empty. Pass the generated_internal_id "
+            "field from search_awards results (e.g. CONT_AWD_...)."
+        )
+    _validate_no_control_chars(generated_award_id, field="generated_award_id")
+    return await _get(f"/api/v2/awards/{generated_award_id.strip()}/")
 
 
 @mcp.tool()
@@ -689,13 +763,16 @@ async def get_transactions(
     Returns per transaction: id, type, action_date, action_type,
     modification_number, description, federal_action_obligation.
     """
+    if not isinstance(generated_award_id, str) or not generated_award_id.strip():
+        raise ValueError("generated_award_id cannot be empty.")
+    _validate_no_control_chars(generated_award_id, field="generated_award_id")
     limit = _clamp_limit(limit, cap=5000)
     if page < 1:
         raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/transactions/",
         {
-            "award_id": generated_award_id,
+            "award_id": generated_award_id.strip(),
             "limit": limit,
             "page": page,
             "sort": sort,
@@ -722,12 +799,15 @@ async def get_award_funding(
     transaction_obligated_amount, object_class.
     """
     limit = _clamp_limit(limit, cap=100)
+    if not isinstance(generated_award_id, str) or not generated_award_id.strip():
+        raise ValueError("generated_award_id cannot be empty.")
+    _validate_no_control_chars(generated_award_id, field="generated_award_id")
     if page < 1:
         raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/awards/funding/",
         {
-            "award_id": generated_award_id,
+            "award_id": generated_award_id.strip(),
             "limit": limit,
             "page": page,
             "sort": sort,
@@ -755,13 +835,16 @@ async def get_idv_children(
     'Award ID'), 'obligated_amount' (not 'Award Amount'), and
     'generated_unique_award_id' (not 'generated_internal_id').
     """
+    if not isinstance(generated_idv_id, str) or not generated_idv_id.strip():
+        raise ValueError("generated_idv_id cannot be empty.")
+    _validate_no_control_chars(generated_idv_id, field="generated_idv_id")
     limit = _clamp_limit(limit, cap=100)
     if page < 1:
         raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/idvs/awards/",
         {
-            "award_id": generated_idv_id,
+            "award_id": generated_idv_id.strip(),
             "type": child_type,
             "limit": limit,
             "page": page,
@@ -873,12 +956,18 @@ async def autocomplete_psc(search_text: str, limit: int = 10) -> dict[str, Any]:
     alphabetical results from the upstream API (useless for matching) and
     empty strings return HTTP 400.
     """
+    _validate_no_control_chars(search_text, field="search_text")
     search_text = (search_text or "").strip()
     if len(search_text) < 2:
         return {
             "results": [],
             "_note": "autocomplete_psc requires at least 2 characters; upstream API returns arbitrary first-N results otherwise.",
         }
+    if len(search_text) > 200:
+        raise ValueError(
+            f"search_text exceeds 200 chars (got {len(search_text)}). "
+            f"Autocomplete is intended for prefix / keyword lookups."
+        )
     limit = _clamp_limit(limit, cap=100)
     return await _post(
         "/api/v2/autocomplete/psc/",
@@ -905,12 +994,17 @@ async def autocomplete_naics(
     returns codes retired in 2012/2017/2022; these are almost never what
     callers want. Set exclude_retired=False to include them.
     """
+    _validate_no_control_chars(search_text, field="search_text")
     search_text = (search_text or "").strip()
     if len(search_text) < 2:
         return {
             "results": [],
             "_note": "autocomplete_naics requires at least 2 characters; upstream substring-matches into parenthetical notes otherwise.",
         }
+    if len(search_text) > 200:
+        raise ValueError(
+            f"search_text exceeds 200 chars (got {len(search_text)})."
+        )
     limit = _clamp_limit(limit, cap=100)
     # Request more from upstream so the client-side retired filter still yields
     # enough results. Cap at 50 to avoid runaway.

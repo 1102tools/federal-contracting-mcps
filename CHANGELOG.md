@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.2
+
+Live audit against the USASpending.gov API surfaced 9 P1 silent-wrong-data
+paths and 4 P2 validation gaps. All fixed.
+
+### P1 silent-wrong-data
+- Null byte / newline / tab in `keywords` silently accepted: the API
+  either strips them (returns unfiltered-ish) or 500s on them. Now
+  every free-text field rejects control characters up front.
+- Null byte in `autocomplete_psc.search_text` and
+  `autocomplete_naics.search_text` produced HTTP 500 from the API.
+  Now rejected locally.
+- Null byte in `generated_award_id` / `generated_idv_id` on
+  `get_transactions`, `get_award_funding`, `get_idv_children`,
+  `get_award_detail` produced HTTP 500. Now rejected locally.
+- Negative `award_amount_min` / `award_amount_max` silently ignored
+  by USASpending and returned unfiltered default results. Now
+  rejected with an explanatory error.
+- `naics_codes=["", "", ""]`, `psc_codes=[""]`, `award_ids=[""]` —
+  list-of-empty-strings used to be silently dropped by
+  `_coerce_code_list`'s filter, leaving an empty list that applied
+  no filter at all. Now rejected with "contains only empty /
+  whitespace strings."
+- Empty / whitespace-only `generated_award_id` on the detail tools
+  hit the API as a 422 or 404. Now rejected up front with a clear
+  pointer to `search_awards` as the source of valid IDs.
+
+### P2 validation
+- `autocomplete_psc` / `autocomplete_naics` now cap `search_text` at
+  200 chars. Long searches are meaningless for autocomplete and
+  triggered upstream 500s.
+
+### Testing
+- 17 new regression tests covering every round-1 and round-2 finding.
+- Old tests kept; total is now 46 offline tests passing.
+
+### USER_AGENT
+- Bumped to `usaspending-gov-mcp/0.2.2`.
+
 ## 0.2.1
 
 Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
