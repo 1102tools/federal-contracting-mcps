@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
+
+- FastMCP tools register pydantic argument models with the default
+  `extra='ignore'` config, so a typo like
+  `lookup_city_perdiem(state_code='VA')` (real param is `state`)
+  silently dropped the typo'd argument and ran without the intended
+  filter. Now every tool has `extra='forbid'` applied after
+  registration, so typos raise "Extra inputs are not permitted"
+  before any HTTP call.
+- USER_AGENT bumped to `gsa-perdiem-mcp/0.2.1`.
+- Added regression test covering the new behavior.
+
 ## 0.2.0
 
 Hardening pass. Deep audit surfaced 55 issues across six rounds (1 P0,

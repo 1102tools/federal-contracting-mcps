@@ -838,6 +838,28 @@ async def compare_locations(
 
 
 # ---------------------------------------------------------------------------
+# Strict parameter validation
+# ---------------------------------------------------------------------------
+
+def _forbid_extra_params_on_all_tools() -> None:
+    """Set extra='forbid' on every registered tool's pydantic arg model.
+
+    FastMCP's default is extra='ignore', which silently drops unknown
+    parameter names. A typo like lookup_city_perdiem(state_code='VA')
+    (real param is `state`) would succeed with the typo discarded and
+    run without the intended filter. extra='forbid' raises "Extra inputs
+    are not permitted" on typos before any HTTP call.
+    """
+    for tool in mcp._tool_manager.list_tools():
+        am = tool.fn_metadata.arg_model
+        am.model_config = {**am.model_config, "extra": "forbid"}
+        am.model_rebuild(force=True)
+
+
+_forbid_extra_params_on_all_tools()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -1371,3 +1371,22 @@ def test_lookup_city_trims_and_uppercases_state():
         assert r["query"]["state"] == "MA"
     finally:
         _restore_get(orig)
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "lookup_city_perdiem",
+                {"city": "Boston", "state": "MA", "bogus_typo": "x"},
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())
