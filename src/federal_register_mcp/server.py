@@ -199,15 +199,74 @@ def _format_error(status: int, body: str) -> str:
     return f"HTTP {status}: {cleaned}"
 
 
+def _ensure_json_container(data: Any, *, url: str) -> dict[str, Any] | list[Any]:
+    """Guarantee a JSON container (dict OR list) return from the Federal
+    Register API. Document/facet/pi endpoints return dicts; /agencies.json
+    returns a list. Anything else (None, int, string) indicates a
+    CDN/proxy issue rather than a real empty result, and used to leak
+    into tool output as a type confusion. Surface it clearly.
+    """
+    if isinstance(data, (dict, list)):
+        return data
+    if data is None:
+        raise RuntimeError(
+            f"Federal Register returned an empty body at {url!r}. This "
+            f"usually indicates a transient CDN / proxy issue; retry "
+            f"in a few seconds."
+        )
+    raise RuntimeError(
+        f"Federal Register returned an unexpected {type(data).__name__} "
+        f"at {url!r} (expected JSON object or list). First 200 chars: "
+        f"{str(data)[:200]!r}"
+    )
+
+
 async def _get(url: str) -> Any:
     try:
         r = await _get_client().get(url)
         r.raise_for_status()
-        return r.json()
+        return _ensure_json_container(r.json(), url=url)
     except httpx.HTTPStatusError as e:
         raise RuntimeError(_format_error(e.response.status_code, e.response.text[:500])) from e
     except httpx.RequestError as e:
         raise RuntimeError(f"Network error calling Federal Register: {e}") from e
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f]")
+
+
+def _validate_no_control_chars(value: Any, *, field: str) -> Any:
+    """Reject control characters (null byte, newline, tab, CR) in free-text
+    values. The Federal Register API silently accepts them, leaving users
+    with confusing 'no filter applied' results."""
+    if value is None:
+        return None
+    if isinstance(value, str) and _CONTROL_CHARS_RE.search(value):
+        raise ValueError(
+            f"{field}={value!r} contains control characters "
+            f"(null byte / newline / tab / CR). Remove them and retry."
+        )
+    return value
+
+
+def _reject_empty_strings_in_list(
+    value: list[str] | None, *, field: str
+) -> list[str] | None:
+    """Reject an all-empty-strings list. Federal Register silently
+    treats `[""]` as 'no filter', the same way `[]` would be. Our
+    `_reject_empty_list` only catches the empty-list case."""
+    if value is None:
+        return None
+    cleaned = [v for v in value if v is not None and str(v).strip()]
+    if not cleaned:
+        raise ValueError(
+            f"{field}={value!r} contains only empty / whitespace strings. "
+            f"Pass real values or omit the parameter."
+        )
+    # Also reject control chars per-entry
+    for i, v in enumerate(cleaned):
+        _validate_no_control_chars(v, field=f"{field}[{i}]")
+    return cleaned
 
 
 def _build_search_params(
@@ -318,9 +377,13 @@ async def search_documents(
     per_page capped at 100 to stay within MCP response size limits.
     """
     agencies = _reject_empty_list(agencies, "agencies")
+    agencies = _reject_empty_strings_in_list(agencies, field="agencies")
     doc_types = _reject_empty_list(doc_types, "doc_types")
     per_page = _clamp(per_page, field="per_page", lo=1, hi=100)
     page = _clamp(page, field="page", lo=1, hi=10_000)
+    _validate_no_control_chars(term, field="term")
+    _validate_no_control_chars(docket_id, field="docket_id")
+    _validate_no_control_chars(regulation_id_number, field="regulation_id_number")
     term = _clamp_str_len(_strip_or_none(term), field="term", maximum=500)
     docket_id = _clamp_str_len(_strip_or_none(docket_id), field="docket_id", maximum=200)
     regulation_id_number = _clamp_str_len(
@@ -335,6 +398,23 @@ async def search_documents(
     _check_date_range(pub_date_gte, pub_date_lte, "publication_date")
     _check_date_range(comment_date_gte, comment_date_lte, "comment_date")
     _check_date_range(effective_date_gte, effective_date_lte, "effective_date")
+
+    # Require at least one real filter. An unfiltered search_documents() call
+    # silently returned the Federal Register's 10,000-doc "most recent"
+    # default as if those were search hits, which is very confusing UX.
+    if not any([
+        agencies, doc_types, term, docket_id, regulation_id_number,
+        pub_date_gte, pub_date_lte,
+        comment_date_gte, comment_date_lte,
+        effective_date_gte, effective_date_lte,
+        correction is not None, significant is not None,
+    ]):
+        raise ValueError(
+            "search_documents requires at least one filter. Typical: "
+            "term=<keywords>, agencies=[<slug>], doc_types=['RULE'], or a "
+            "publication_date range. Calling without filters silently "
+            "returns the Federal Register's 10,000-doc unfiltered default."
+        )
 
     qs = _build_search_params(
         agencies=agencies, doc_types=doc_types, term=term,
@@ -403,7 +483,9 @@ async def get_facet_counts(
     required. An unfiltered facet query returns the entire all-time aggregate.
     """
     agencies = _reject_empty_list(agencies, "agencies")
+    agencies = _reject_empty_strings_in_list(agencies, field="agencies")
     doc_types = _reject_empty_list(doc_types, "doc_types")
+    _validate_no_control_chars(term, field="term")
     term = _clamp_str_len(_strip_or_none(term), field="term", maximum=500)
     pub_date_gte = _warn_pre_fr_date(
         _validate_date(pub_date_gte, "pub_date_gte"), "pub_date_gte"
@@ -463,6 +545,8 @@ async def get_public_inspection(
       Unfiltered dumps can exceed 170KB; narrow with filters or raise the cap.
     """
     limit = _clamp(limit, field="limit", lo=1, hi=500)
+    _validate_no_control_chars(agency_filter, field="agency_filter")
+    _validate_no_control_chars(keyword_filter, field="keyword_filter")
     agency_filter = _strip_or_none(agency_filter)
     keyword_filter = _strip_or_none(keyword_filter)
 

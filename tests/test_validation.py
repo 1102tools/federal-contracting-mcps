@@ -15,10 +15,18 @@ import os
 
 import pytest
 
+import federal_register_mcp.server as srv  # noqa: E402
 from federal_register_mcp.server import mcp
 
 
 LIVE = os.environ.get("FR_LIVE_TESTS") == "1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_client():
+    srv._client = None
+    yield
+    srv._client = None
 
 
 async def _call(name: str, **kwargs):
@@ -330,7 +338,7 @@ def test_get_document_accepts_correction_prefix():
 
 def test_user_agent_version_matches():
     from federal_register_mcp.constants import USER_AGENT
-    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_clean_error_body_strips_html():
@@ -411,3 +419,298 @@ def test_unknown_param_rejected():
             return
         raise AssertionError("expected extra-param rejection")
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 0.2.2: live-audit fixes (rounds 1-4)
+# ---------------------------------------------------------------------------
+
+def test_search_documents_no_filters_rejected():
+    """P1: unfiltered search used to return 10,000 "most recent" FR docs."""
+    asyncio.run(_call_expect_error(
+        "search_documents", "at least one filter",
+    ))
+
+
+def test_search_documents_empty_term_alone_rejected():
+    """Empty string via term shouldn't be silently accepted as no filter."""
+    asyncio.run(_call_expect_error(
+        "search_documents", "at least one filter",
+        term="",
+    ))
+
+
+def test_search_documents_whitespace_term_alone_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "at least one filter",
+        term="   ",
+    ))
+
+
+def test_search_documents_null_byte_in_term_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        term="x\x00y",
+    ))
+
+
+def test_search_documents_newline_in_term_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        term="x\ny",
+    ))
+
+
+def test_search_documents_tab_in_term_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        term="x\ty",
+    ))
+
+
+def test_search_documents_cr_in_term_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        term="x\ry",
+    ))
+
+
+def test_search_documents_all_empty_agencies_rejected():
+    """P1: agencies=[''] used to return 10,000 default results."""
+    asyncio.run(_call_expect_error(
+        "search_documents", "contains only empty",
+        agencies=[""],
+    ))
+
+
+def test_search_documents_whitespace_agencies_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "contains only empty",
+        agencies=["   ", ""],
+    ))
+
+
+def test_search_documents_null_byte_in_docket_id_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        docket_id="x\x00y",
+    ))
+
+
+def test_search_documents_null_byte_in_rin_rejected():
+    asyncio.run(_call_expect_error(
+        "search_documents", "control characters",
+        regulation_id_number="x\x00y",
+    ))
+
+
+def test_get_public_inspection_null_byte_in_keyword_filter():
+    asyncio.run(_call_expect_error(
+        "get_public_inspection", "control characters",
+        keyword_filter="x\x00y",
+    ))
+
+
+def test_get_public_inspection_null_byte_in_agency_filter():
+    asyncio.run(_call_expect_error(
+        "get_public_inspection", "control characters",
+        agency_filter="x\x00y",
+    ))
+
+
+def test_get_facet_counts_null_byte_in_term():
+    asyncio.run(_call_expect_error(
+        "get_facet_counts", "control characters",
+        facet="type", term="x\x00y",
+    ))
+
+
+def test_get_facet_counts_empty_agencies_rejected():
+    asyncio.run(_call_expect_error(
+        "get_facet_counts", "contains only empty",
+        facet="type", agencies=[""],
+    ))
+
+
+# --- Response shape guard ---
+
+def test_ensure_json_container_rejects_none():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return None
+        @property
+        def text(self): return ""
+    class FakeClient:
+        is_closed = False
+        async def get(self, url, **kw): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_documents(term="test"))
+    except RuntimeError as e:
+        assert "empty body" in str(e).lower()
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_ensure_json_container_rejects_int():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return 42
+        @property
+        def text(self): return "42"
+    class FakeClient:
+        is_closed = False
+        async def get(self, url, **kw): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_documents(term="test"))
+    except RuntimeError as e:
+        assert "unexpected int" in str(e).lower()
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_ensure_json_container_accepts_list():
+    """/agencies.json returns a list. Shape guard must allow it."""
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return [{"id": 1, "name": "A", "slug": "a"}]
+        @property
+        def text(self): return "[]"
+    class FakeClient:
+        is_closed = False
+        async def get(self, url, **kw): return FakeResp()
+    srv._client = FakeClient()
+    r = asyncio.run(srv.list_agencies())
+    assert r.get("total_agencies") == 1
+
+
+def test_ensure_json_container_rejects_string():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return "oops"
+        @property
+        def text(self): return "oops"
+    class FakeClient:
+        is_closed = False
+        async def get(self, url, **kw): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_documents(term="test"))
+    except RuntimeError as e:
+        assert "unexpected str" in str(e).lower()
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_user_agent_matches_version():
+    from federal_register_mcp.constants import USER_AGENT
+    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+
+
+# ---- LIVE tests ----
+
+
+def _payload(result):
+    return result[1] if isinstance(result, tuple) else result
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_search_with_term_returns_data():
+    r = asyncio.run(_call("search_documents", term="cybersecurity", per_page=5))
+    data = _payload(r)
+    assert (data.get("count") or 0) > 0
+    assert len(data.get("results", [])) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_search_compound_filter_narrows():
+    r = asyncio.run(_call(
+        "search_documents",
+        term="cybersecurity",
+        agencies=["defense-department"],
+        doc_types=["RULE"],
+        pub_date_gte="2024-01-01", pub_date_lte="2024-12-31",
+        per_page=3,
+    ))
+    data = _payload(r)
+    # Compound filter should return <1000 vs unfiltered 10,000
+    assert (data.get("count") or 0) < 1000
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_get_document_real():
+    """Two calls on one event loop so the shared httpx client stays valid."""
+    async def _run():
+        r1 = await _call("search_documents", term="cybersecurity", per_page=1)
+        doc_num = _payload(r1)["results"][0]["document_number"]
+        r2 = await _call("get_document", document_number=doc_num)
+        return doc_num, _payload(r2)
+    doc_num, data = asyncio.run(_run())
+    assert data.get("document_number") == doc_num
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_list_agencies_returns_many():
+    r = asyncio.run(_call("list_agencies"))
+    data = _payload(r)
+    # There are ~470 FR agencies
+    assert data.get("total_agencies", 0) > 100
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_facet_counts():
+    r = asyncio.run(_call("get_facet_counts", facet="type", term="cybersecurity"))
+    data = _payload(r)
+    # Facet response has type codes as top-level keys
+    assert isinstance(data, dict) and len(data) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_public_inspection():
+    r = asyncio.run(_call("get_public_inspection", limit=5))
+    data = _payload(r)
+    assert "total_pi_documents" in data
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_far_case_history():
+    r = asyncio.run(_call("far_case_history", docket_id="FAR-2023-0008"))
+    data = _payload(r)
+    assert data.get("total_documents", 0) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_date_range_works():
+    r = asyncio.run(_call(
+        "search_documents",
+        pub_date_gte="2024-06-01", pub_date_lte="2024-06-30",
+        term="rule", per_page=3,
+    ))
+    data = _payload(r)
+    assert isinstance(data.get("results"), list)
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_concurrent_searches():
+    async def _run():
+        return await asyncio.gather(*[
+            _call("search_documents", term=t, per_page=3)
+            for t in ("cyber", "grant", "contract", "rule", "notice")
+        ])
+    rs = asyncio.run(_run())
+    assert all(_payload(r).get("results") is not None for r in rs)
+
+
+@pytest.mark.skipif(not LIVE, reason="requires FR_LIVE_TESTS=1")
+def test_live_boolean_filter_significant():
+    r = asyncio.run(_call(
+        "search_documents", term="cyber", significant=True, per_page=3,
+    ))
+    data = _payload(r)
+    # significant=True should still return some results
+    assert isinstance(data.get("results"), list)

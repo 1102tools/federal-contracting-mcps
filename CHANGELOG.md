@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.2.2
+
+Full live-audit pass (rounds 1-4) against the real Federal Register API
+surfaced 12 P1 silent-wrong-data paths + 3 P2 validation gaps. All fixed.
+
+### P1 silent-wrong-data
+- `search_documents()` called with NO filter args silently returned the
+  Federal Register's 10,000-doc "most recent" default as if those were
+  search hits. Now raises "requires at least one filter" with a pointer
+  to typical filter combinations.
+- `term=""`, `term="   "`, `term="x\x00y"`, `term="x\ny"`, `term="x\ty"`,
+  `term="x\ry"` all used to silently reach the API and return matches-
+  all (10,000) or near-matches-all results. Now every free-text field
+  rejects control characters up front and the at-least-one-filter rule
+  rejects the empty-term-alone case.
+- `agencies=[""]` or `agencies=["", "  "]` used to silently return
+  10,000 default results (filter effectively ignored). The 0.2.0
+  validator caught `agencies=[]` but not the all-empty-strings list.
+  Now `_reject_empty_strings_in_list` catches both.
+- Null byte / control chars in `docket_id` and `regulation_id_number`
+  silently reached the API.
+- Same for `get_public_inspection`'s `agency_filter` / `keyword_filter`
+  and `get_facet_counts`'s `term`.
+- `_get` had no response-shape guard. None / int / str responses
+  passed through and leaked into tool output as type confusion. Now
+  `_ensure_json_container` guarantees a dict OR list (the latter is
+  needed for `/agencies.json`) and raises a clear RuntimeError
+  otherwise.
+
+### P2 validation
+- Inconsistent validation across tools: search_documents, get_facet_counts,
+  get_public_inspection all gained the same control-char + empty-list
+  rejection so typos surface the same way everywhere.
+
+### Testing
+- 20 new offline tests covering every round-1 and round-4 finding.
+- 10 new live-gated tests (`FR_LIVE_TESTS=1`): real search, compound
+  filters narrowing results, get_document round-trip, list_agencies
+  count, facet counts, public inspection, far case history, date range,
+  concurrent 5-call, and boolean filters.
+- 77 tests total (64 offline + 13 live), all passing. 0.2.1 shipped
+  with 44. This closes the audit-depth gap with sam-gov / bls-oews /
+  gsa-perdiem / regulationsgov.
+- Autouse `_reset_client` fixture added for multi-event-loop safety.
+
+### USER_AGENT
+- Bumped to `federal-register-mcp/0.2.2`.
+
 ## 0.2.1
 
 Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
