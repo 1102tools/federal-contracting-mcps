@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
+
+- FastMCP tools generate pydantic argument models with the default
+  `extra='ignore'` config. Unknown parameter names were silently
+  dropped: a typo like `search_cfr(keyword='audit')` (real param is
+  `query`) would succeed with the typo discarded, leaving the tool
+  to call the API without the intended filter. Now every tool has
+  `extra='forbid'` applied after registration, so typos raise
+  "Extra inputs are not permitted" before any HTTP call.
+- USER_AGENT bumped to `ecfr-mcp/0.2.1`.
+- Added regression test covering the new behavior.
+
 ## 0.2.0
 
 Hardening pass. Deep audit surfaced 72 issues across five rounds (2 P0, 26 P1,

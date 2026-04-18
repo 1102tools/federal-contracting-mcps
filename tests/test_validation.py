@@ -797,3 +797,22 @@ def test_live_get_cfr_content_dfars_chapter_2():
     r = asyncio.run(_call("get_cfr_content", title_number=48, chapter="2", section="252.204-7012"))
     data = _payload(r)
     assert len(data.get("paragraphs", [])) > 3
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop.
+    FastMCP default is extra='ignore' which lets silent-wrong-data through."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "search_cfr", {"query": "audit", "bogus_typo": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())
