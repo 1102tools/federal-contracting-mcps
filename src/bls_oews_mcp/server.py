@@ -856,6 +856,29 @@ async def list_common_metros() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Strict parameter validation
+# ---------------------------------------------------------------------------
+
+def _forbid_extra_params_on_all_tools() -> None:
+    """Set extra='forbid' on every registered tool's pydantic arg model.
+
+    FastMCP's default is extra='ignore', which silently drops unknown
+    parameter names. A typo like get_wage_data(ocupation_code='15-1252')
+    (with the real parameter soc_code) would succeed with the typo
+    silently discarded, returning default-filter data with no indication
+    of the problem. extra='forbid' surfaces typos immediately with
+    "Extra inputs are not permitted".
+    """
+    for tool in mcp._tool_manager.list_tools():
+        am = tool.fn_metadata.arg_model
+        am.model_config = {**am.model_config, "extra": "forbid"}
+        am.model_rebuild(force=True)
+
+
+_forbid_extra_params_on_all_tools()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

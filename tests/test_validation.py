@@ -509,7 +509,7 @@ def test_clean_error_body_passthrough_non_html():
 
 def test_user_agent_matches_version():
     from bls_oews_mcp.constants import USER_AGENT
-    assert "0.2.0" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_api_key_status_whitespace_flagged():
@@ -564,3 +564,22 @@ def test_live_igce_benchmark_software_devs():
     result = asyncio.run(_call("igce_wage_benchmark", occ_code="151252"))
     payload = _payload(result)
     assert "benchmarks" in payload
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop.
+    FastMCP default is extra='ignore' which lets silent-wrong-data through."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "get_wage_data", {"occ_code": "15-1252", "bogus_typo": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())

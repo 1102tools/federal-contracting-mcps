@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
+
+- FastMCP tools generate pydantic argument models with the default
+  `extra='ignore'` config. Unknown parameter names were silently
+  dropped: a typo like `get_wage_data(ocupation_code='15-1252')` (the
+  real parameter is `occ_code`) succeeded with the typo discarded,
+  and the tool ran with an empty / default-filter result set. Now
+  every tool has `extra='forbid'` applied after registration, so
+  typos raise "Extra inputs are not permitted" before any HTTP call.
+- USER_AGENT bumped to `bls-oews-mcp/0.2.1`.
+- Added regression test covering the new behavior.
+
 ## 0.2.0
 Hardening release. Five audit rounds surfaced 40+ issues; this release closes
 12 crash paths and 12 silent-wrong-data bugs, plus validation gaps across every
