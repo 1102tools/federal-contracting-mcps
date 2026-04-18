@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.3.1
+
+Live-audit follow-up. With a real SAM.gov API key we re-ran every tool
+against the live API and found 3 P1 bugs that the 0.3.0 mocked audit
+rounds could not have caught. All fixed.
+
+### Silent-wrong-data fixes (P1)
+- The WAF pre-filter introduced in 0.3.0 was almost entirely false
+  positives. It rejected single quotes (`'`), backticks, angle
+  brackets, and SQL keywords on the theory that SAM.gov's upstream WAF
+  would drop the connection. Live testing proved SAM.gov accepts all
+  of these as literal search text. The filter was blocking legitimate
+  company-name searches: McDonald's, L'Oreal, O'Brien, O'Reilly,
+  etc. all raised a spurious "WAF triggered" error. Filter narrowed
+  to just null bytes and control characters (tab, CR, LF), which
+  really do break URL encoding or the API.
+- Unknown parameter names were silently dropped. FastMCP tools
+  generate pydantic argument models with the default `extra='ignore'`
+  config, so a typo like `search_entities(keyword='Lockheed')` (the
+  real parameter is `free_text`) succeeded with the typo parameter
+  silently discarded -- the tool then hit the API with no filters
+  and returned all 700k+ entities. Applied `extra='forbid'` to every
+  tool's arg model after registration. Typos now raise
+  `Extra inputs are not permitted` before any HTTP call.
+- `lookup_award_by_piid` accepted empty / whitespace PIID, making an
+  API call that returned empty with no indication of the problem.
+  Now raises a clear error up front.
+
+### Error-message clarity (P3)
+- PSC lookup 404s used to leak SAM's opaque
+  `{"response": "Entered search criteria is not found"}` body. Now
+  translated to: "SAM.gov did not find any record matching your
+  search. For PSC codes: verify the code exists at
+  https://www.acquisition.gov/psc-manual..."
+
+### Testing
+- `tests/test_validation.py`: 13 new tests (6 offline regressions for
+  the new fixes, 6 live regressions gated by `SAM_LIVE_TESTS=1`). Old
+  WAF-rejection tests were replaced with "WAF-accepts" tests to catch
+  regression if someone re-adds the overzealous filter.
+- Added autouse fixture to reset `srv._client` between tests
+  (multi-event-loop safety).
+
 ## 0.3.0
 Deep hardening release. Four audit rounds surfaced 30+ issues behind SAM.gov's
 notoriously temperamental API surface. This release adds aggressive

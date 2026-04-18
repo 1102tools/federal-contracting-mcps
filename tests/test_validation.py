@@ -17,10 +17,23 @@ import pytest
 # Our validators raise before any HTTP call, so network isn't needed for most tests.
 os.environ.setdefault("SAM_API_KEY", "SAM-00000000-0000-0000-0000-000000000000")
 
+import sam_gov_mcp.server as srv  # noqa: E402
 from sam_gov_mcp.server import mcp  # noqa: E402
 
 
 LIVE = os.environ.get("SAM_LIVE_TESTS") == "1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_client():
+    """Reset the shared httpx client before every test.
+
+    pytest creates a fresh event loop per test via asyncio.run. Reusing a
+    stale AsyncClient across loops raises 'Event loop is closed'.
+    """
+    srv._client = None
+    yield
+    srv._client = None
 
 
 async def _call(name: str, **kwargs):
@@ -257,7 +270,8 @@ def test_clean_error_body_passthrough_non_html():
 
 def test_user_agent_matches_version():
     from sam_gov_mcp.constants import USER_AGENT
-    assert "0.3.0" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    # Match the current published version; bump this string when pyproject bumps.
+    assert "0.3.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---------------------------------------------------------------------------
@@ -405,33 +419,59 @@ def test_search_opportunities_title_length():
     ))
 
 
-def test_search_entities_name_waf_single_quote():
+# 0.3.0 shipped with a WAF filter that rejected `'`, `` ` ``, `<`, SQL
+# keywords, and path traversal sequences. Round 1 of the 0.3.1 live audit
+# confirmed those were false positives -- SAM.gov accepts all those patterns
+# as literal search text. The filter blocked legitimate company names
+# containing apostrophes (McDonald's, L'Oreal, O'Brien). It was removed in
+# 0.3.1. These replacement tests assert the new, narrower filter accepts
+# those and still rejects null bytes / control characters.
+
+
+def test_search_entities_allows_apostrophe():
+    """Apostrophe in company name must not be rejected (McDonald's, O'Brien)."""
+    # Use the 'pre-network' path: a bogus key produces an auth error, but
+    # validators run first. We just assert it isn't blocked on validation.
+    try:
+        asyncio.run(_call("search_entities", legal_business_name="O'Brien Corp"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "firewall" not in msg
+        assert "single quote" not in msg
+
+
+def test_search_entities_allows_angle_brackets():
+    try:
+        asyncio.run(_call("search_entities", legal_business_name="<script>"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "firewall" not in msg
+        assert "angle bracket" not in msg
+
+
+def test_search_entities_allows_sql_keywords():
+    try:
+        asyncio.run(_call("search_entities", legal_business_name="DROP TABLE users"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "firewall" not in msg
+
+
+def test_search_entities_rejects_null_byte():
     asyncio.run(_call_expect_error(
-        "search_entities", "firewall", legal_business_name="O'Brien Corp"
+        "search_entities", "null byte", legal_business_name="abc\x00def"
     ))
 
 
-def test_search_entities_name_waf_angle_bracket():
+def test_search_entities_rejects_newline():
     asyncio.run(_call_expect_error(
-        "search_entities", "firewall", legal_business_name="Tech <b>Co</b>"
+        "search_entities", "control character", legal_business_name="abc\ndef"
     ))
 
 
-def test_search_entities_name_waf_sql():
+def test_search_entities_rejects_tab():
     asyncio.run(_call_expect_error(
-        "search_entities", "firewall", legal_business_name="DROP TABLE users"
-    ))
-
-
-def test_search_entities_name_waf_path_traversal():
-    asyncio.run(_call_expect_error(
-        "search_entities", "firewall", legal_business_name="../../etc/passwd"
-    ))
-
-
-def test_search_contract_awards_free_text_waf():
-    asyncio.run(_call_expect_error(
-        "search_contract_awards", "firewall", free_text="'; DROP TABLE",
+        "search_entities", "control character", legal_business_name="abc\tdef"
     ))
 
 
@@ -569,3 +609,139 @@ def test_search_exclusions_country_rejects_digits():
     asyncio.run(_call_expect_error(
         "search_exclusions", "3-character ISO", country="123"
     ))
+
+
+# ---------------------------------------------------------------------------
+# 0.3.1 regression tests: live-audit findings
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected_on_search_entities():
+    """0.3.0 silently accepted typo'd param names, returning unfiltered data.
+    E.g. search_entities(keyword='x') actually ignored keyword and returned
+    all 700k entities. Fixed by applying extra='forbid' to every tool's
+    pydantic arg model."""
+    asyncio.run(_call_expect_error(
+        "search_entities", "extra inputs are not permitted",
+        legal_business_name="Lockheed", keyword="ignored-typo",
+    ))
+
+
+def test_unknown_param_rejected_on_search_exclusions():
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "search_exclusions", {"name": "Smith", "bogus_param": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())
+
+
+def test_unknown_param_rejected_on_search_opportunities():
+    asyncio.run(_call_expect_error(
+        "search_opportunities", "extra inputs are not permitted",
+        posted_from="01/01/2026", posted_to="01/31/2026", keyword="typo",
+    ))
+
+
+def test_unknown_param_rejected_on_search_contract_awards():
+    asyncio.run(_call_expect_error(
+        "search_contract_awards", "extra inputs are not permitted",
+        date_signed="[01/01/2025,01/31/2025]", department_name="typo",
+    ))
+
+
+def test_lookup_award_by_piid_rejects_empty():
+    asyncio.run(_call_expect_error(
+        "lookup_award_by_piid", "cannot be empty", piid="",
+    ))
+
+
+def test_lookup_award_by_piid_rejects_whitespace():
+    asyncio.run(_call_expect_error(
+        "lookup_award_by_piid", "cannot be empty", piid="   ",
+    ))
+
+
+def test_lookup_award_by_piid_rejects_control_chars():
+    asyncio.run(_call_expect_error(
+        "lookup_award_by_piid", "control characters", piid="ABC\ndef",
+    ))
+
+
+# ---- LIVE tests for 0.3.1 regressions ----
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_apostrophe_in_company_name_works():
+    """0.3.0 blocked apostrophes via an overzealous WAF filter.
+    0.3.1 removed that filter after confirming SAM.gov accepts apostrophes."""
+    r = asyncio.run(_call("search_entities", legal_business_name="McDonald's", size=3))
+    data = _payload(r)
+    # Must not raise; total_records is a valid integer string or int
+    assert "totalRecords" in data or "entityData" in data
+
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_lockheed_free_text_returns_matches():
+    r = asyncio.run(_call("search_entities", legal_business_name="Lockheed Martin", size=3))
+    data = _payload(r)
+    total = int(data.get("totalRecords", 0))
+    assert total > 0, f"expected >0 Lockheed matches, got {total}"
+
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_psc_valid_code_returns_data():
+    r = asyncio.run(_call("lookup_psc_code", code="R425"))
+    data = _payload(r)
+    assert int(data.get("totalRecords", 0)) >= 1
+
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_psc_invalid_code_clear_error():
+    """0.3.0 leaked the opaque 'Entered search criteria is not found' message.
+    0.3.1 translates to a clear PSC-specific error."""
+    try:
+        asyncio.run(_call("lookup_psc_code", code="ZZZZ"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "did not find" in msg or "psc-manual" in msg, f"error still opaque: {e}"
+        return
+    raise AssertionError("expected 404 on bogus PSC code")
+
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_opportunities_filter_applied():
+    """Confirm free_text/title filter actually narrows results vs. baseline.
+    Both calls share an event loop so the shared httpx client stays valid."""
+    async def _run():
+        r_all = await _call(
+            "search_opportunities",
+            posted_from="01/01/2026", posted_to="04/18/2026", limit=1,
+        )
+        r_title = await _call(
+            "search_opportunities",
+            posted_from="01/01/2026", posted_to="04/18/2026",
+            title="cybersecurity", limit=1,
+        )
+        return r_all, r_title
+    r_all, r_title = asyncio.run(_run())
+    all_total = int(_payload(r_all).get("totalRecords", 0))
+    title_total = int(_payload(r_title).get("totalRecords", 0))
+    assert title_total < all_total, (
+        f"filter did not reduce results: all={all_total}, title={title_total}"
+    )
+
+
+@pytest.mark.skipif(not LIVE, reason="requires SAM_LIVE_TESTS=1 + SAM_API_KEY")
+def test_live_unknown_param_rejected_before_network():
+    """Confirm the extra='forbid' patch applies live too."""
+    try:
+        asyncio.run(_call(
+            "search_entities", legal_business_name="Lockheed", bogus_typo="x",
+        ))
+    except Exception as e:
+        assert "extra inputs are not permitted" in str(e).lower()
+        return
+    raise AssertionError("extra param not rejected")

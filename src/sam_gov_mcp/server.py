@@ -199,32 +199,33 @@ def _as_list(value: Any) -> list[Any]:
     return [value]  # best-effort
 
 
-# WAF trigger patterns — SAM.gov's upstream firewall drops the connection when
-# these appear in search params. Pre-reject with actionable message instead of
-# round-tripping to get silently blocked.
-_WAF_PATTERNS = [
-    (re.compile(r"\.\./"), "path traversal ('../')"),
-    (re.compile(r"<[a-z/]", re.IGNORECASE), "HTML angle brackets"),
-    (re.compile(r"\b(?:drop|select|union|insert|delete|truncate)\s+(?:table|from)\b",
-                re.IGNORECASE), "SQL keywords"),
-    (re.compile(r"--\s*$", re.MULTILINE), "SQL comment marker"),
-    (re.compile(r"/\*|\*/"), "SQL block comment"),
+# Input sanity patterns. The original 0.3.0 release had a WAF filter that
+# rejected single quotes, angle brackets, SQL keywords, and backticks, on the
+# assumption that SAM.gov's WAF dropped connections on these. Round-1 live
+# audit (v0.3.1) confirmed this was wrong: SAM.gov accepts all of those as
+# literal search text. The filter blocked legitimate company names like
+# McDonald's, L'Oreal, O'Reilly, etc. Now we only reject things that actually
+# break URL construction or the API:
+_REJECT_PATTERNS = [
     (re.compile(r"\x00"), "null byte"),
-    (re.compile(r"['`]"), "single quote or backtick"),
+    (re.compile(r"[\r\n\t]"), "control character (tab / CR / LF)"),
 ]
 
 
 def _validate_waf_safe(value: str | None, *, field: str) -> str | None:
-    """Reject strings likely to trigger SAM.gov's WAF connection drop."""
+    """Reject strings that contain control characters that break URL encoding.
+
+    Historical name kept for backward compatibility; SAM.gov does not in
+    practice have a WAF that blocks the patterns the original filter tried
+    to guard against. See the _REJECT_PATTERNS comment above.
+    """
     if value is None:
         return None
-    for pattern, description in _WAF_PATTERNS:
+    for pattern, description in _REJECT_PATTERNS:
         if pattern.search(value):
             raise ValueError(
-                f"{field}={value!r} contains characters that trigger SAM.gov's "
-                f"web application firewall ({description}). The firewall drops "
-                f"the connection instead of returning an error. Remove the "
-                f"offending characters before searching."
+                f"{field}={value!r} contains {description}. "
+                f"Remove the offending character and retry."
             )
     return value
 
@@ -417,6 +418,20 @@ def _format_error(status: int, body: str) -> str:
             "length limit. Shorten your search parameters (entity names, "
             "free text) and try again."
         )
+    if status == 404:
+        # PSC endpoint returns the unhelpful "Entered search criteria is not
+        # found" on a valid-format code that just doesn't exist in SAM's
+        # database. Translate.
+        if "entered search criteria is not found" in cleaned.lower():
+            return (
+                "HTTP 404: SAM.gov did not find any record matching your search. "
+                "For PSC codes: verify the code exists at "
+                "https://www.acquisition.gov/psc-manual (common codes are "
+                "4 characters like 'R425', 'D302' is not a valid PSC). "
+                "For free-text PSC searches: SAM's PSC endpoint requires a "
+                "substring that appears in an active PSC name or description."
+            )
+        return f"HTTP 404: {cleaned}"
     return f"HTTP {status}: {cleaned}"
 
 
@@ -1296,10 +1311,16 @@ async def lookup_award_by_piid(
     modifications. Check totalRecords for the number of mods found.
     """
     if not piid or not piid.strip():
-        return {"awardSummary": [], "totalRecords": 0, "_note": "Empty PIID provided."}
+        raise ValueError(
+            "piid cannot be empty. Pass a contract identifier like "
+            "'GS-35F-0119Y', 'W912BV22P0112', or 'N0003925F7516'."
+        )
+    piid_clean = piid.strip()
+    if any(c in piid_clean for c in ("\x00", "\n", "\r", "\t")):
+        raise ValueError(f"piid={piid!r} contains control characters.")
 
     params: dict[str, Any] = {
-        "piid": piid.strip(),
+        "piid": piid_clean,
         "limit": "100",
         "offset": "0",
     }
@@ -1507,6 +1528,28 @@ async def vendor_responsibility_check(uei: str) -> dict[str, Any]:
                 result["flags"].append("ACTIVE_EXCLUSION_FOUND")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Strict parameter validation
+# ---------------------------------------------------------------------------
+
+def _forbid_extra_params_on_all_tools() -> None:
+    """Set extra='forbid' on every registered tool's pydantic arg model.
+
+    Default FastMCP behavior is extra='ignore' which silently drops unknown
+    parameter names. That turns a typo like search_entities(keyword='x')
+    (the real param is free_text) into an unfiltered default-query response
+    instead of an error. Applying extra='forbid' across the board surfaces
+    typos immediately.
+    """
+    for tool in mcp._tool_manager.list_tools():
+        am = tool.fn_metadata.arg_model
+        am.model_config = {**am.model_config, "extra": "forbid"}
+        am.model_rebuild(force=True)
+
+
+_forbid_extra_params_on_all_tools()
 
 
 # ---------------------------------------------------------------------------
