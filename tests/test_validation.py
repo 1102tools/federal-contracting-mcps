@@ -50,20 +50,50 @@ def test_keyword_search_whitespace_rejected():
     asyncio.run(_call_expect_error("keyword_search", "cannot be empty", keyword="   "))
 
 
-def test_keyword_search_waf_sql():
-    asyncio.run(_call_expect_error("keyword_search", "firewall", keyword="'; DROP TABLE"))
+# 0.2.0 shipped a WAF filter copied from sam-gov-mcp that rejected single
+# quotes, SQL keywords, backticks, and semicolons. Round-1 of the 0.2.1
+# live audit proved those were false positives -- GSA CALC accepts all of
+# them as literal search text. Filter narrowed to just angle brackets,
+# path traversal, and null bytes (which DO trigger GSA's WAF with 403).
 
 
-def test_keyword_search_waf_angle_brackets():
+def test_keyword_search_waf_angle_brackets_still_rejected():
     asyncio.run(_call_expect_error("keyword_search", "firewall", keyword="<script>"))
 
 
-def test_keyword_search_waf_path_traversal():
+def test_keyword_search_waf_path_traversal_still_rejected():
     asyncio.run(_call_expect_error("keyword_search", "firewall", keyword="../../admin"))
 
 
-def test_keyword_search_waf_single_quote():
-    asyncio.run(_call_expect_error("keyword_search", "firewall", keyword="O'Brien"))
+def test_keyword_search_apostrophe_accepted():
+    """Apostrophe in labor-category name (O'Brien, O'Reilly) must not be blocked."""
+    try:
+        asyncio.run(_call("keyword_search", keyword="O'Brien"))
+    except Exception as e:
+        msg = str(e).lower()
+        assert "firewall" not in msg
+        assert "single quote" not in msg
+
+
+def test_keyword_search_sql_keywords_accepted():
+    try:
+        asyncio.run(_call("keyword_search", keyword="DROP TABLE"))
+    except Exception as e:
+        assert "firewall" not in str(e).lower()
+
+
+def test_keyword_search_backtick_accepted():
+    try:
+        asyncio.run(_call("keyword_search", keyword="a`b"))
+    except Exception as e:
+        assert "firewall" not in str(e).lower()
+
+
+def test_keyword_search_semicolon_accepted():
+    try:
+        asyncio.run(_call("keyword_search", keyword="a;b"))
+    except Exception as e:
+        assert "firewall" not in str(e).lower()
 
 
 def test_keyword_search_too_long():
@@ -276,9 +306,17 @@ def test_igce_benchmark_empty_labor():
     ))
 
 
-def test_igce_benchmark_waf_in_labor():
+def test_igce_benchmark_waf_accepts_apostrophe_sql():
+    """labor_category with apostrophe and SQL keywords must be accepted."""
+    try:
+        asyncio.run(_call("igce_benchmark", labor_category="'; DROP"))
+    except Exception as e:
+        assert "firewall" not in str(e).lower()
+
+
+def test_igce_benchmark_waf_rejects_angle_brackets():
     asyncio.run(_call_expect_error(
-        "igce_benchmark", "firewall", labor_category="'; DROP"
+        "igce_benchmark", "firewall", labor_category="<script>"
     ))
 
 
@@ -673,7 +711,7 @@ def test_price_reasonableness_vs_median_unknown_when_missing():
 
 def test_user_agent_matches_version():
     from gsa_calc_mcp.constants import USER_AGENT
-    assert "0.2.0" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---------------------------------------------------------------------------
@@ -692,3 +730,21 @@ def test_live_suggest_contains_booz():
     result = asyncio.run(_call("suggest_contains", field="vendor_name", term="booz"))
     payload = _payload(result)
     assert len(payload.get("suggestions", [])) > 0
+
+
+# ---------------------------------------------------------------------------
+# 0.2.1: extra='forbid' applied to every tool
+# ---------------------------------------------------------------------------
+
+def test_unknown_param_rejected():
+    """Typo'd param names must raise, not silently drop."""
+    async def _run():
+        try:
+            await mcp.call_tool(
+                "keyword_search", {"keyword": "engineer", "bogus_typo": "x"}
+            )
+        except Exception as e:
+            assert "extra inputs are not permitted" in str(e).lower()
+            return
+        raise AssertionError("expected extra-param rejection")
+    asyncio.run(_run())

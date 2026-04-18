@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.1
+
+Two fixes triggered by the sam-gov-mcp 0.3.1 live audit:
+
+- WAF pre-filter introduced in 0.2.0 had false positives. Live-verified
+  against the real GSA CALC API: apostrophes (O'Reilly, O'Brien),
+  backticks, semicolons, and SQL keywords (DROP TABLE) are all accepted
+  as literal search text. Only HTML angle brackets and path traversal
+  sequences actually trigger a 403. Filter narrowed accordingly so
+  searches for labor categories like "O'Reilly Software Engineer"
+  no longer raise a spurious "WAF triggered" error.
+- Unknown parameter names were silently dropped. FastMCP tools register
+  pydantic arg models with the default `extra='ignore'`, so a typo like
+  `keyword_search(keyword='engineer')` (real param is `q`) silently
+  discarded the typo'd argument and ran with no filter. Now every tool
+  has `extra='forbid'` applied after registration, raising
+  "Extra inputs are not permitted" on typos before any HTTP call.
+- USER_AGENT bumped to `gsa-calc-mcp/0.2.1`.
+- Replaced obsolete WAF-rejection tests with WAF-accepts tests so this
+  filter cannot silently get reverted.
+
 ## 0.2.0
 Deep hardening release. Six audit rounds surfaced 74 issues behind the thin
 0.1.x shell. This release closes 19 distinct crash paths and 30 silent

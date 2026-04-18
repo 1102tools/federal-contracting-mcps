@@ -89,16 +89,15 @@ def _safe_number(value: Any) -> float | int | None:
 
 _ASCII_PRINTABLE_SAFE_RE = re.compile(r"^[A-Za-z0-9 \-_,.:/()&#+|*@$]*$")
 
-# WAF triggers for GSA's firewall (observed empirically: quote, SQL, angle brackets,
-# path traversal all return 403/503)
+# WAF triggers for GSA CALC's firewall. The 0.2.0 filter was copied from
+# sam-gov-mcp and included many false positives. Live-verified in the 0.2.1
+# audit: GSA CALC accepts apostrophes, backticks, semicolons, and SQL
+# keywords as literal search text (e.g. "O'Reilly Labor Category" now works).
+# The only patterns that genuinely trigger a 403 are angle brackets,
+# path traversal, and null bytes.
 _WAF_PATTERNS = [
     (re.compile(r"\.\./"), "path traversal ('../')"),
     (re.compile(r"<[a-z/]", re.IGNORECASE), "HTML angle brackets"),
-    (re.compile(r"\b(?:drop|select|union|insert|delete|truncate)\s+(?:table|from)\b",
-                re.IGNORECASE), "SQL keywords"),
-    (re.compile(r"--\s*$", re.MULTILINE), "SQL comment marker"),
-    (re.compile(r"/\*|\*/"), "SQL block comment"),
-    (re.compile(r"['`;]"), "single quote, backtick, or semicolon"),
     (re.compile(r"\x00"), "null byte"),
 ]
 
@@ -1026,6 +1025,28 @@ async def sin_analysis(
         "sin": sin_code,
         **stats,
     }
+
+
+# ---------------------------------------------------------------------------
+# Strict parameter validation
+# ---------------------------------------------------------------------------
+
+def _forbid_extra_params_on_all_tools() -> None:
+    """Set extra='forbid' on every registered tool's pydantic arg model.
+
+    FastMCP's default is extra='ignore', which silently drops unknown
+    parameter names. A typo like keyword_search(keyword='engineer') (real
+    param is `q`) would succeed with the typo silently discarded, returning
+    unfiltered data. extra='forbid' raises "Extra inputs are not permitted"
+    on typos before any HTTP call.
+    """
+    for tool in mcp._tool_manager.list_tools():
+        am = tool.fn_metadata.arg_model
+        am.model_config = {**am.model_config, "extra": "forbid"}
+        am.model_rebuild(force=True)
+
+
+_forbid_extra_params_on_all_tools()
 
 
 # ---------------------------------------------------------------------------
