@@ -5,7 +5,7 @@
 BASE_URL_V2 = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BASE_URL_V1 = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "bls-oews-mcp/0.1.1"
+USER_AGENT = "bls-oews-mcp/0.2.0"
 
 # OEWS data lags ~2 years. Do NOT use the calendar year.
 # May 2024 estimates released April 2025. Next: May 2025 estimates in ~April 2026.
@@ -24,13 +24,22 @@ DATATYPE_LABELS: dict[str, str] = {
     "01": "Employment",
     "03": "Hourly Mean Wage",
     "04": "Annual Mean Wage",
-    "08": "Hourly Median",
+    "07": "Hourly 10th Percentile",
+    "08": "Hourly 25th Percentile",
+    "09": "Hourly Median",
+    "10": "Hourly 75th Percentile",
     "11": "Annual 10th Percentile",
     "12": "Annual 25th Percentile",
     "13": "Annual Median",
     "14": "Annual 75th Percentile",
     "15": "Annual 90th Percentile",
+    "16": "Annual 90th Percentile (alt code)",
 }
+
+# The set of datatypes we route as HOURLY values in _parse_value
+HOURLY_DATATYPES: set[str] = {"03", "07", "08", "09", "10"}
+# Datatypes returning COUNTS (not dollars)
+COUNT_DATATYPES: set[str] = {"01"}
 
 # Datatypes used for IGCE wage profiles
 IGCE_DATATYPES = ["04", "11", "13", "15"]  # mean, 10th, median, 90th

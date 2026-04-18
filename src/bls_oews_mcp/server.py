@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Literal
+import re
+from typing import Any, Literal, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -26,9 +27,11 @@ from .constants import (
     BASE_URL_V1,
     BASE_URL_V2,
     COMMON_SOC_CODES,
+    COUNT_DATATYPES,
     DATATYPE_LABELS,
     DEFAULT_TIMEOUT,
     FULL_DATATYPES,
+    HOURLY_DATATYPES,
     IGCE_DATATYPES,
     MAX_SERIES_V1,
     MAX_SERIES_V2,
@@ -42,13 +45,166 @@ mcp = FastMCP("bls-oews")
 
 
 # ---------------------------------------------------------------------------
+# Validators and normalizers
+# ---------------------------------------------------------------------------
+
+# ASCII-only digit regex (Python's .isdigit() accepts Unicode digits like fullwidth)
+_ASCII_DIGITS_RE = re.compile(r"^[0-9]+$")
+_DATATYPE_RE = re.compile(r"^[0-9]{2}$")
+_YEAR_RE = re.compile(r"^[0-9]{4}$")
+
+# OEWS data is available from 1997 onward (earliest published year).
+OEWS_EARLIEST_YEAR = 1997
+OEWS_LATEST_FUTURE_YEAR = 2100  # generous upper bound
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Normalize XML-to-JSON single-item collapse. BLS (and any SOAP-backed API)
+    sometimes returns a lone dict where a list is expected."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _coerce_str_digits(value: Any, *, field: str, length: int | None = None) -> str:
+    """Coerce a numeric-looking value (int or str) to an ASCII-digit string.
+
+    Rejects Unicode digits (fullwidth, etc), whitespace, dashes. If length is
+    given, enforces exact length after stripping."""
+    if value is None:
+        raise ValueError(f"{field} cannot be None.")
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer or digit-string, not bool.")
+    if isinstance(value, int):
+        s = str(value)
+    elif isinstance(value, str):
+        s = value.strip()
+    else:
+        raise ValueError(f"{field} must be an integer or string. Got {type(value).__name__}.")
+    if not s:
+        raise ValueError(f"{field} cannot be empty.")
+    if not _ASCII_DIGITS_RE.match(s):
+        raise ValueError(
+            f"{field}={value!r} must contain only ASCII digits 0-9 "
+            f"(no dashes, letters, whitespace, or Unicode digit characters)."
+        )
+    if length is not None and len(s) != length:
+        raise ValueError(
+            f"{field}={value!r} must be exactly {length} digits. Got {len(s)}."
+        )
+    return s
+
+
+def _validate_soc(value: Any, *, field: str = "occ_code") -> str:
+    """Validate a SOC code: exactly 6 ASCII digits. No dash (use '151252' not '15-1252')."""
+    return _coerce_str_digits(value, field=field, length=6)
+
+
+def _validate_industry(value: Any, *, field: str = "industry") -> str:
+    """Validate a 6-digit NAICS-like industry code."""
+    return _coerce_str_digits(value, field=field, length=6)
+
+
+def _validate_datatype(value: Any, *, field: str = "datatype") -> str:
+    """Validate a 2-digit datatype code. Accepts int or str."""
+    s = _coerce_str_digits(value, field=field, length=2)
+    if s not in DATATYPE_LABELS:
+        sample = ", ".join(sorted(DATATYPE_LABELS.keys()))
+        raise ValueError(
+            f"{field}={value!r} is not a known OEWS datatype. Valid: {sample}."
+        )
+    return s
+
+
+def _validate_year(value: Any, *, field: str = "year") -> str:
+    """Validate a 4-digit year in OEWS range. Accepts int or str (stripped)."""
+    if value is None:
+        return str(OEWS_CURRENT_YEAR)
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a year, not bool.")
+    if isinstance(value, int):
+        s = str(value)
+    elif isinstance(value, str):
+        s = value.strip()
+    else:
+        raise ValueError(f"{field} must be an integer or year-string. Got {type(value).__name__}.")
+    if not s:
+        return str(OEWS_CURRENT_YEAR)
+    if not _YEAR_RE.match(s):
+        raise ValueError(
+            f"{field}={value!r} must be a 4-digit year (e.g. '2024' or 2024). "
+            f"Decimals, whitespace, and leading zeros beyond 4 digits are rejected."
+        )
+    y = int(s)
+    if y < OEWS_EARLIEST_YEAR or y > OEWS_LATEST_FUTURE_YEAR:
+        raise ValueError(
+            f"{field}={y} is out of OEWS range. "
+            f"Valid years: {OEWS_EARLIEST_YEAR}..{OEWS_LATEST_FUTURE_YEAR}. "
+            f"OEWS data currently lags ~2 years; default is {OEWS_CURRENT_YEAR}."
+        )
+    return s
+
+
+def _normalize_whitespace_str(value: Any) -> str | None:
+    """Strip and normalize an arbitrary str-like value, or return None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        return s if s else None
+    return str(value).strip() or None
+
+
+_HTML_ERROR_RE = re.compile(r"<(?:!doctype|html)", re.IGNORECASE)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+
+
+def _clean_error_body(text: str) -> str:
+    """Strip HTML bodies from upstream error responses so error messages stay readable."""
+    if not _HTML_ERROR_RE.search(text):
+        return text[:400]
+    pieces: list[str] = []
+    t = _TITLE_RE.search(text)
+    if t:
+        pieces.append(t.group(1).strip())
+    h = _H1_RE.search(text)
+    if h and (not t or h.group(1).strip() != t.group(1).strip()):
+        pieces.append(h.group(1).strip())
+    return " - ".join(pieces) if pieces else "upstream returned HTML error page"
+
+
+# ---------------------------------------------------------------------------
 # Auth and HTTP
 # ---------------------------------------------------------------------------
 
 def _get_api_key() -> str | None:
-    """Read BLS API key from environment. None = v1 (25/day)."""
+    """Read BLS API key from environment. None = v1 (25/day).
+
+    Whitespace-only values are treated as unset (silent downgrade to v1). Callers
+    that need to know whether a key was intentionally provided should use
+    _api_key_status() instead.
+    """
     key = os.environ.get("BLS_API_KEY", "").strip()
     return key if key else None
+
+
+def _api_key_status() -> dict[str, Any]:
+    """Report whether API key was set, empty, whitespace-only, or absent."""
+    raw = os.environ.get("BLS_API_KEY")
+    if raw is None:
+        return {"set": False, "mode": "v1", "note": "BLS_API_KEY not set (v1, 25/day)"}
+    stripped = raw.strip()
+    if not stripped:
+        return {
+            "set": True, "mode": "v1",
+            "note": "BLS_API_KEY is set but empty/whitespace-only; using v1 (25/day).",
+        }
+    return {"set": True, "mode": "v2", "note": "v2 mode (500/day)"}
 
 
 _client: httpx.AsyncClient | None = None
@@ -65,6 +221,7 @@ def _get_client() -> httpx.AsyncClient:
 
 
 def _format_error(status: int, body: str) -> str:
+    cleaned = _clean_error_body(body)
     if status == 429:
         key = _get_api_key()
         limit = "500/day (v2)" if key else "25/day (v1)"
@@ -74,13 +231,13 @@ def _format_error(status: int, body: str) -> str:
             "https://data.bls.gov/registrationEngine/ for 500 queries/day."
         )
     if status == 400:
-        return f"HTTP 400: Bad request. Check series ID format (must be exactly 25 chars). API response: {body[:300]}"
+        return f"HTTP 400: Bad request. Check series ID format (must be exactly 25 chars). API response: {cleaned}"
     if status == 403:
         return (
             "HTTP 403: Forbidden. Your BLS API key may be invalid. "
             "Register a free key at https://data.bls.gov/registrationEngine/"
         )
-    return f"HTTP {status}: {body[:400]}"
+    return f"HTTP {status}: {cleaned}"
 
 
 async def _query_bls(
@@ -112,7 +269,22 @@ async def _query_bls(
     try:
         r = await _get_client().post(base_url, content=json.dumps(payload))
         r.raise_for_status()
-        data = r.json()
+
+        try:
+            data = r.json()
+        except json.JSONDecodeError as e:
+            body_preview = _clean_error_body(r.text or "(empty body)")
+            raise RuntimeError(
+                f"BLS returned non-JSON response on 200 OK. "
+                f"This often happens during API maintenance or when an HTML "
+                f"error page is served without an error status. "
+                f"Body: {body_preview}"
+            ) from e
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"BLS response was not a JSON object. Got {type(data).__name__}: {str(data)[:200]}"
+            )
 
         status = data.get("status")
         if status == "REQUEST_NOT_PROCESSED":
@@ -121,6 +293,11 @@ async def _query_bls(
                 f"BLS API refused the request: {messages}. "
                 "Common cause: rate limit exceeded or malformed series IDs."
             )
+        if status == "REQUEST_PARTIALLY_PROCESSED":
+            # Surface the warnings so caller knows some series failed.
+            messages = data.get("message", [])
+            data["_partial"] = True
+            data["_warnings"] = messages
         return data
 
     except httpx.HTTPStatusError as e:
@@ -152,9 +329,24 @@ def _build_series_id(
     return sid
 
 
-def _normalize_area(area_input: str) -> str:
-    """Convert 2-digit FIPS, 5-digit MSA, or 7-char code to 7-char format."""
-    area = str(area_input).strip()
+def _normalize_area(area_input: Any) -> str:
+    """Convert 2-digit FIPS, 5-digit MSA, or 7-digit full code to 7-char format.
+
+    Requires ASCII digits only; rejects letters, unicode digits, whitespace.
+    """
+    if area_input is None:
+        raise ValueError("area_code cannot be None.")
+    if isinstance(area_input, int):
+        area = str(area_input)
+    else:
+        area = str(area_input).strip()
+    if not area:
+        raise ValueError("area_code cannot be empty.")
+    if not _ASCII_DIGITS_RE.match(area):
+        raise ValueError(
+            f"area_code={area_input!r} must contain only ASCII digits 0-9. "
+            f"Got characters other than digits."
+        )
     if len(area) == 7:
         return area
     if len(area) == 5:
@@ -164,28 +356,80 @@ def _normalize_area(area_input: str) -> str:
     raise ValueError(
         f"Unrecognized area code '{area}' (length {len(area)}). "
         "Expected: 2-digit state FIPS (e.g., '51'), 5-digit MSA (e.g., '47900'), "
-        "or 7-char full code (e.g., '0047900')."
+        "or 7-digit full code (e.g., '0047900')."
     )
 
 
-def _parse_value(value: str, datatype: str, footnotes: list[str] | None = None) -> dict[str, Any]:
-    """Parse a BLS data value, handling special codes."""
-    if value in SPECIAL_VALUES:
-        msg = f"[Capped] {footnotes[0]}" if footnotes else f"[Suppressed: {value}]"
-        return {"raw": value, "formatted": msg, "numeric": None, "suppressed": True}
+def _parse_value(value: Any, datatype: str, footnotes: list[str] | None = None) -> dict[str, Any]:
+    """Parse a BLS data value, handling special codes and unusual types."""
+    # Normalize: str-coerce non-strings, strip whitespace (BLS sometimes pads)
+    if value is None:
+        return {"raw": None, "formatted": "No data", "numeric": None, "suppressed": True}
+    raw = value
+    if isinstance(value, str):
+        stripped = value.strip()
+    else:
+        stripped = str(value).strip()
+
+    if stripped in SPECIAL_VALUES or stripped == "":
+        msg = f"[Capped] {footnotes[0]}" if footnotes else f"[Suppressed: {stripped or '(empty)'}]"
+        return {"raw": raw, "formatted": msg, "numeric": None, "suppressed": True}
 
     try:
-        if datatype == "01":
-            n = int(float(value))
-            return {"raw": value, "formatted": f"{n:,}", "numeric": n, "suppressed": False}
-        elif datatype in ("03", "06", "07", "08", "09", "10"):
-            n = float(value)
-            return {"raw": value, "formatted": f"${n:,.2f}/hr", "numeric": n, "suppressed": False}
+        if datatype in COUNT_DATATYPES:
+            n = int(float(stripped))
+            return {"raw": raw, "formatted": f"{n:,}", "numeric": n, "suppressed": False}
+        elif datatype in HOURLY_DATATYPES:
+            n = float(stripped)
+            return {"raw": raw, "formatted": f"${n:,.2f}/hr", "numeric": n, "suppressed": False}
         else:
-            n = int(float(value))
-            return {"raw": value, "formatted": f"${n:,}", "numeric": n, "suppressed": False}
+            n = int(float(stripped))
+            return {"raw": raw, "formatted": f"${n:,}", "numeric": n, "suppressed": False}
     except (ValueError, TypeError):
-        return {"raw": value, "formatted": f"[Unparseable: {value}]", "numeric": None, "suppressed": False}
+        return {"raw": raw, "formatted": f"[Unparseable: {stripped}]", "numeric": None, "suppressed": False}
+
+
+def _extract_first_data_entry(series_item: Any) -> dict[str, Any] | None:
+    """Safely pull the first data entry from a series response, tolerating
+    XML-to-JSON collapse, None entries, and missing keys. Returns None if no
+    valid entry exists.
+    """
+    if not isinstance(series_item, dict):
+        return None
+    data = _as_list(series_item.get("data"))
+    for entry in data:
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def _safe_footnotes(entry: dict[str, Any]) -> list[str]:
+    """Extract footnote text strings, tolerating dict/str/None footnotes fields."""
+    raw = entry.get("footnotes")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw] if raw.strip() else []
+    items = _as_list(raw)
+    out: list[str] = []
+    for f in items:
+        if isinstance(f, dict):
+            text = f.get("text")
+            if text:
+                out.append(text)
+        elif isinstance(f, str) and f.strip():
+            out.append(f)
+    return out
+
+
+def _series_id_from(series_item: Any, fallback: str = "") -> str:
+    """Extract seriesID from a series response item, tolerating int/missing."""
+    if not isinstance(series_item, dict):
+        return fallback
+    sid = series_item.get("seriesID")
+    if sid is None:
+        return fallback
+    return str(sid)
 
 
 # ---------------------------------------------------------------------------
@@ -194,12 +438,12 @@ def _parse_value(value: str, datatype: str, footnotes: list[str] | None = None) 
 
 @mcp.tool()
 async def get_wage_data(
-    occ_code: str,
+    occ_code: Union[str, int],
     scope: Literal["national", "state", "metro"] = "national",
-    area_code: str | None = None,
-    industry: str = "000000",
+    area_code: Union[str, int, None] = None,
+    industry: Union[str, int] = "000000",
     datatypes: list[str] | None = None,
-    year: str | None = None,
+    year: Union[str, int, None] = None,
 ) -> dict[str, Any]:
     """Get wage data for an occupation by SOC code.
 
@@ -234,22 +478,31 @@ async def get_wage_data(
 
     Values of '-' mean wage >= $239,200/yr (capped). '*' means sample too small.
     """
-    if not occ_code or not occ_code.strip().isdigit() or len(occ_code.strip()) != 6:
-        raise ValueError(
-            f"occ_code must be a 6-digit SOC code (e.g., '151252'). Got {occ_code!r}."
-        )
+    occ_code = _validate_soc(occ_code)
+    industry = _validate_industry(industry)
+    year = _validate_year(year)
 
-    occ_code = occ_code.strip()
     if datatypes is None:
         datatypes = list(IGCE_DATATYPES)
+    if not datatypes:
+        raise ValueError(
+            "datatypes cannot be empty. Pass None for defaults or specify at least one code."
+        )
+    validated_datatypes = [_validate_datatype(dt, field="datatypes[i]") for dt in datatypes]
+    # Dedup while preserving order
+    seen: set[str] = set()
+    validated_datatypes = [x for x in validated_datatypes if not (x in seen or seen.add(x))]
 
     prefix_map = {"national": "OEUN", "state": "OEUS", "metro": "OEUM"}
     prefix = prefix_map[scope]
 
     if scope == "national":
+        if area_code is not None:
+            # area_code is ignored at national scope; keep quiet but flag in response
+            pass
         area = "0000000"
     else:
-        if not area_code:
+        if area_code is None or (isinstance(area_code, str) and not area_code.strip()):
             raise ValueError(f"area_code is required for scope='{scope}'.")
         area = _normalize_area(area_code)
 
@@ -259,38 +512,54 @@ async def get_wage_data(
             "(scope='national'). Cannot combine state/metro scope with industry filter."
         )
 
-    series_ids = [_build_series_id(prefix, area, industry, occ_code, dt) for dt in datatypes]
+    series_ids = [_build_series_id(prefix, area, industry, occ_code, dt) for dt in validated_datatypes]
     data = await _query_bls(series_ids, start_year=year)
 
     results: dict[str, Any] = {}
-    for series in data.get("Results", {}).get("series", []):
-        sid = series["seriesID"]
-        dt = sid[-2:]
-        label = DATATYPE_LABELS.get(dt, dt)
-        if series["data"]:
-            entry = series["data"][0]
-            footnotes = [f.get("text", "") for f in entry.get("footnotes", []) if f.get("text")]
-            results[label] = _parse_value(entry["value"], dt, footnotes)
-            results["_data_year"] = entry["year"]
-            results["_period"] = entry["periodName"]
+    series_list = _as_list(data.get("Results", {}).get("series"))
+    for series in series_list:
+        if not isinstance(series, dict):
+            continue
+        sid = _series_id_from(series)
+        dt = sid[-2:] if sid else ""
+        label = DATATYPE_LABELS.get(dt, dt or "unknown")
+        entry = _extract_first_data_entry(series)
+        if entry:
+            footnotes = _safe_footnotes(entry)
+            results[label] = _parse_value(entry.get("value"), dt, footnotes)
+            year_val = entry.get("year")
+            period_val = entry.get("periodName")
+            if year_val is not None:
+                results["_data_year"] = str(year_val)
+            if period_val is not None:
+                results["_period"] = str(period_val)
         else:
             results[label] = {"raw": None, "formatted": "No data", "numeric": None, "suppressed": True}
 
-    return {
+    response: dict[str, Any] = {
         "occ_code": occ_code,
         "scope": scope,
-        "area_code": area_code,
+        "area_code": area_code if scope != "national" else None,
         "industry": industry,
         "wages": results,
     }
+    if scope == "national" and area_code is not None:
+        response["_note"] = (
+            f"area_code={area_code!r} was ignored because scope='national'. "
+            "Use scope='state' or scope='metro' for geographic breakdowns."
+        )
+    if data.get("_partial"):
+        response["_partial"] = True
+        response["_warnings"] = data.get("_warnings", [])
+    return response
 
 
 @mcp.tool()
 async def compare_metros(
-    occ_code: str,
-    metro_codes: list[str],
-    datatype: str = "04",
-    year: str | None = None,
+    occ_code: Union[str, int],
+    metro_codes: list[Union[str, int]],
+    datatype: Union[str, int] = "04",
+    year: Union[str, int, None] = None,
 ) -> dict[str, Any]:
     """Compare wages for one occupation across multiple metro areas.
 
@@ -302,47 +571,62 @@ async def compare_metros(
 
     Max ~12 metros per call (each metro = 1 series, 50 series limit on v2).
     """
-    if not occ_code or len(occ_code.strip()) != 6:
-        raise ValueError(f"occ_code must be 6-digit SOC. Got {occ_code!r}.")
+    occ_code = _validate_soc(occ_code)
+    datatype = _validate_datatype(datatype)
+    year = _validate_year(year)
     if not metro_codes:
         raise ValueError("metro_codes list cannot be empty.")
 
-    occ_code = occ_code.strip()
-    series_ids = []
-    metro_labels = {}
+    # Dedup metros while preserving order (first occurrence wins)
+    deduped: list[Any] = []
+    seen: set[str] = set()
     for code in metro_codes:
-        area = _normalize_area(code.strip())
+        key = str(code).strip()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(code)
+
+    series_ids: list[str] = []
+    metro_labels: dict[str, str] = {}
+    for code in deduped:
+        area = _normalize_area(code)
         sid = _build_series_id("OEUM", area, "000000", occ_code, datatype)
         series_ids.append(sid)
-        metro_labels[sid] = code.strip()
+        metro_labels[sid] = str(code).strip()
 
     data = await _query_bls(series_ids, start_year=year)
 
     metros: dict[str, Any] = {}
-    for series in data.get("Results", {}).get("series", []):
-        sid = series["seriesID"]
-        code = metro_labels.get(sid, sid)
-        if series["data"]:
-            entry = series["data"][0]
-            footnotes = [f.get("text", "") for f in entry.get("footnotes", []) if f.get("text")]
-            metros[code] = _parse_value(entry["value"], datatype, footnotes)
+    series_list = _as_list(data.get("Results", {}).get("series"))
+    for series in series_list:
+        if not isinstance(series, dict):
+            continue
+        sid = _series_id_from(series)
+        code = metro_labels.get(sid, sid or "unknown")
+        entry = _extract_first_data_entry(series)
+        if entry:
+            metros[code] = _parse_value(entry.get("value"), datatype, _safe_footnotes(entry))
         else:
             metros[code] = {"raw": None, "formatted": "No data", "numeric": None, "suppressed": True}
 
-    return {
+    response: dict[str, Any] = {
         "occ_code": occ_code,
         "datatype": DATATYPE_LABELS.get(datatype, datatype),
         "metros": metros,
     }
+    if data.get("_partial"):
+        response["_partial"] = True
+        response["_warnings"] = data.get("_warnings", [])
+    return response
 
 
 @mcp.tool()
 async def compare_occupations(
-    occ_codes: list[str],
+    occ_codes: list[Union[str, int]],
     scope: Literal["national", "state", "metro"] = "national",
-    area_code: str | None = None,
-    datatype: str = "04",
-    year: str | None = None,
+    area_code: Union[str, int, None] = None,
+    datatype: Union[str, int] = "04",
+    year: Union[str, int, None] = None,
 ) -> dict[str, Any]:
     """Compare wages across multiple occupations in one location.
 
@@ -354,56 +638,76 @@ async def compare_occupations(
     if not occ_codes:
         raise ValueError("occ_codes list cannot be empty.")
 
+    datatype = _validate_datatype(datatype)
+    year = _validate_year(year)
+
     prefix_map = {"national": "OEUN", "state": "OEUS", "metro": "OEUM"}
     prefix = prefix_map[scope]
 
     if scope == "national":
         area = "0000000"
     else:
-        if not area_code:
+        if area_code is None or (isinstance(area_code, str) and not area_code.strip()):
             raise ValueError(f"area_code required for scope='{scope}'.")
         area = _normalize_area(area_code)
 
-    series_ids = []
-    occ_labels = {}
+    # Dedup while preserving order
+    seen: set[str] = set()
+    deduped: list[Any] = []
     for code in occ_codes:
-        code = code.strip()
-        if len(code) != 6:
-            raise ValueError(f"Each occ_code must be 6 digits. Got {code!r}.")
-        sid = _build_series_id(prefix, area, "000000", code, datatype)
+        key = str(code).strip()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(code)
+
+    series_ids: list[str] = []
+    occ_labels: dict[str, str] = {}
+    for code in deduped:
+        validated = _validate_soc(code)
+        sid = _build_series_id(prefix, area, "000000", validated, datatype)
         series_ids.append(sid)
-        occ_labels[sid] = code
+        occ_labels[sid] = validated
 
     data = await _query_bls(series_ids, start_year=year)
 
     occupations: dict[str, Any] = {}
-    for series in data.get("Results", {}).get("series", []):
-        sid = series["seriesID"]
-        code = occ_labels.get(sid, sid)
+    series_list = _as_list(data.get("Results", {}).get("series"))
+    for series in series_list:
+        if not isinstance(series, dict):
+            continue
+        sid = _series_id_from(series)
+        code = occ_labels.get(sid, sid or "unknown")
         label = COMMON_SOC_CODES.get(code, code)
-        if series["data"]:
-            entry = series["data"][0]
-            footnotes = [f.get("text", "") for f in entry.get("footnotes", []) if f.get("text")]
-            occupations[f"{code} ({label})"] = _parse_value(entry["value"], datatype, footnotes)
+        entry = _extract_first_data_entry(series)
+        if entry:
+            occupations[f"{code} ({label})"] = _parse_value(
+                entry.get("value"), datatype, _safe_footnotes(entry)
+            )
         else:
-            occupations[f"{code} ({label})"] = {"raw": None, "formatted": "No data", "numeric": None, "suppressed": True}
+            occupations[f"{code} ({label})"] = {
+                "raw": None, "formatted": "No data", "numeric": None, "suppressed": True,
+            }
 
-    return {
+    response: dict[str, Any] = {
         "scope": scope,
-        "area_code": area_code,
+        "area_code": area_code if scope != "national" else None,
         "datatype": DATATYPE_LABELS.get(datatype, datatype),
         "occupations": occupations,
     }
+    if data.get("_partial"):
+        response["_partial"] = True
+        response["_warnings"] = data.get("_warnings", [])
+    return response
 
 
 @mcp.tool()
 async def igce_wage_benchmark(
-    occ_code: str,
+    occ_code: Union[str, int],
     scope: Literal["national", "state", "metro"] = "national",
-    area_code: str | None = None,
+    area_code: Union[str, int, None] = None,
     burden_low: float = 1.8,
     burden_high: float = 2.2,
-    year: str | None = None,
+    year: Union[str, int, None] = None,
 ) -> dict[str, Any]:
     """Get wage benchmarks formatted for IGCE development.
 
@@ -421,7 +725,26 @@ async def igce_wage_benchmark(
     The burdened range should roughly align with GSA CALC+ ceiling rates
     for comparable labor categories. If CALC+ >> burdened BLS, the role
     may require specialized skills or clearance overhead. Document the gap.
+
+    Burden multipliers must be positive and burden_low <= burden_high.
+    Reasonable range: 1.3 (lean) to 4.0 (high-overhead/clearance).
     """
+    if not isinstance(burden_low, (int, float)) or not isinstance(burden_high, (int, float)):
+        raise ValueError("burden_low and burden_high must be numeric.")
+    if burden_low <= 0 or burden_high <= 0:
+        raise ValueError(
+            f"Burden multipliers must be positive. Got low={burden_low}, high={burden_high}."
+        )
+    if burden_low > burden_high:
+        raise ValueError(
+            f"burden_low ({burden_low}) must be <= burden_high ({burden_high})."
+        )
+    if burden_high > 10.0:
+        raise ValueError(
+            f"burden_high={burden_high} is implausibly large. "
+            f"Reasonable max ~4.0x for high-overhead (SCIF/deployed) work."
+        )
+
     wage_data = await get_wage_data(
         occ_code=occ_code, scope=scope, area_code=area_code,
         datatypes=["04", "11", "13", "15"], year=year,
@@ -475,16 +798,29 @@ async def detect_latest_year() -> dict[str, Any]:
 
     try:
         data = await _query_bls([probe_series], start_year=candidate, end_year=candidate)
-        for s in data.get("Results", {}).get("series", []):
-            if s.get("data") and s["data"][0].get("value") not in SPECIAL_VALUES:
+        series_list = _as_list(data.get("Results", {}).get("series"))
+        for s in series_list:
+            entry = _extract_first_data_entry(s)
+            if entry and str(entry.get("value", "")).strip() not in SPECIAL_VALUES:
                 return {
                     "latest_year": candidate,
                     "default_year": current,
                     "newer_data_available": True,
                     "message": f"OEWS {candidate} data is available. Use year='{candidate}' for the latest estimates.",
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        # Don't silently eat the error: surface it so user knows probing failed
+        return {
+            "latest_year": current,
+            "default_year": current,
+            "newer_data_available": False,
+            "probe_error": str(e),
+            "message": (
+                f"Could not probe for newer data (reason: {type(e).__name__}). "
+                f"Defaulting to OEWS {current}. Rate limit, key issue, or BLS downtime "
+                f"can all cause this. Call again later to check."
+            ),
+        }
 
     return {
         "latest_year": current,
