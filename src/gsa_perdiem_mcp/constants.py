@@ -4,5 +4,4 @@
 
 BASE_URL = "https://api.gsa.gov/travel/perdiem/v2/rates"
 DEFAULT_TIMEOUT = 15.0
-USER_AGENT = "gsa-perdiem-mcp/0.1.1"
-DEFAULT_FISCAL_YEAR = 2026
+USER_AGENT = "gsa-perdiem-mcp/0.2.0"

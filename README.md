@@ -18,9 +18,24 @@ Exposes the GSA Per Diem API as 6 MCP tools:
 - `estimate_travel_cost` - Calculate trip per diem (lodging + M&IE with first/last day at 75%)
 - `compare_locations` - Compare rates across multiple cities
 
-## Authentication (optional)
+## Get your own API key (strongly recommended)
 
-Works immediately with DEMO_KEY (~10 req/hr). For 1,000 req/hr, register free at [api.data.gov/signup](https://api.data.gov/signup/) and set `PERDIEM_API_KEY` in your config.
+This server hits `api.gsa.gov`, which uses api.data.gov for rate limiting.
+
+- **Without a key**: falls back to the shared `DEMO_KEY` which is capped at
+  **~10 requests per hour across everyone using it**. A couple real prompts
+  will blow through that limit and you'll start seeing 429 errors.
+- **With a personal key**: 1,000 requests per hour, yours alone.
+
+**Get a free key (takes 30 seconds):**
+
+1. Go to [api.data.gov/signup](https://api.data.gov/signup/)
+2. Enter your name and email — no approval, no wait
+3. Copy the key from the confirmation page
+4. Paste it into your Claude Desktop config as `PERDIEM_API_KEY` (see below)
+
+The same key works for every api.data.gov-backed API (GSA Per Diem, NASA,
+FEC, FCC, etc.).
 
 ## Installation
 
@@ -30,19 +45,7 @@ uvx gsa-perdiem-mcp
 
 ## Claude Desktop configuration
 
-Without key (works immediately):
-```json
-{
-  "mcpServers": {
-    "gsa-perdiem": {
-      "command": "uvx",
-      "args": ["gsa-perdiem-mcp"]
-    }
-  }
-}
-```
-
-With key:
+**Recommended (with your own key):**
 ```json
 {
   "mcpServers": {
@@ -50,8 +53,20 @@ With key:
       "command": "uvx",
       "args": ["gsa-perdiem-mcp"],
       "env": {
-        "PERDIEM_API_KEY": "your-api-data-gov-key"
+        "PERDIEM_API_KEY": "paste-your-api-data-gov-key-here"
       }
+    }
+  }
+}
+```
+
+**Without a key** (works for a handful of calls per hour, then 429s until the hour rolls over):
+```json
+{
+  "mcpServers": {
+    "gsa-perdiem": {
+      "command": "uvx",
+      "args": ["gsa-perdiem-mcp"]
     }
   }
 }
