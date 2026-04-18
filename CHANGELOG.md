@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.0
+
+Hardening release. Found via integration stress testing through a real MCP client (not raw coroutine awaits), which surfaced 28+ issues invisible to the prior unit tests.
+
+### Tool behavior changes
+
+- **get_award_count** and **spending_over_time** now raise `ValueError` when called with no filters, rather than forwarding an empty-filters request to the API (which 400s). Pass at least one filter (time_period, keywords, agency).
+- **autocomplete_psc** and **autocomplete_naics** now require a minimum 2-character query. Single-character or empty queries return an empty result with a `_note` explaining why. Upstream returns arbitrary first-N alphabetical records on short queries, which silently misleads callers.
+- **autocomplete_naics** adds `exclude_retired=True` (default). The upstream NAICS taxonomy includes codes retired in 2012/2017/2022 which dominate certain keyword matches (e.g. "software" previously returned only retired codes). Set `exclude_retired=False` to restore prior behavior.
+
+### Schema and input validation
+
+- `limit` on search, autocomplete, and convenience tools now raises when <1 or over the API's cap (100 for search endpoints, 5000 for transactions). Previously schema was unbounded and callers hit upstream 422s or 95KB+ response payloads.
+- `page` parameter now requires `>= 1` across all paginated tools.
+- `time_period_start` / `time_period_end` now validated as `YYYY-MM-DD`. ISO 8601 datetimes, slash-separated dates, and reversed ranges (end before start) raise actionable errors.
+- `award_amount_min > award_amount_max` now raises instead of silently returning zero results.
+- `naics_codes`, `psc_codes`, `award_ids`, `set_aside_type_codes`, `extent_competed_type_codes`, `contract_pricing_type_codes`, `def_codes` accept both strings and integers (auto-coerced to strings). Empty arrays raise `ValueError` to catch `naics_codes=[]` silent-match bugs.
+- `place_of_performance_state` validated as 2-letter USPS code, auto-uppercased.
+- `toptier_code` in `get_agency_overview` and `get_agency_awards` auto-left-pads numeric inputs shorter than 3 digits (e.g. "97" → "097").
+- `fiscal_year` bounded to `[2008, current FY]` on agency endpoints.
+- `lookup_piid.piid` now requires minimum 3 characters (upstream keyword filter minimum).
+
+### Error hygiene
+
+- HTTP 404 responses from USASpending that return an HTML error page (`<!doctype html>...`) are now parsed down to the title/h1 text, rather than leaking the full HTML body to callers.
+
+### Documentation
+
+- `search_awards` docstring now warns that `awarding_agency` must be the full name (e.g. "Department of the Navy"), not the slug form ("department-of-the-navy"). Slugs silently return zero results.
+
 ## 0.1.2
 Initial release.
 

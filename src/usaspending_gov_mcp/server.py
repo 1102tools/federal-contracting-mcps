@@ -12,6 +12,8 @@ defaults matching common federal acquisition workflows.
 
 from __future__ import annotations
 
+import re
+from datetime import date
 from typing import Any, Literal
 
 import httpx
@@ -55,6 +57,24 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+_HTML_ERROR_RE = re.compile(r"<!doctype html>.*?</html>", re.IGNORECASE | re.DOTALL)
+
+
+def _clean_error_body(text: str) -> str:
+    """Strip HTML bodies from upstream error responses for clean messages."""
+    if "<!doctype html>" in text.lower() or "<html" in text.lower():
+        # Try to extract a <title> or <h1> for context
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.IGNORECASE | re.DOTALL)
+        h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", text, re.IGNORECASE | re.DOTALL)
+        pieces = []
+        if title_match:
+            pieces.append(title_match.group(1).strip())
+        if h1_match and (not title_match or h1_match.group(1).strip() != title_match.group(1).strip()):
+            pieces.append(h1_match.group(1).strip())
+        return " - ".join(pieces) if pieces else "upstream returned HTML error page"
+    return text[:500]
+
+
 def _format_http_error(e: httpx.HTTPStatusError) -> str:
     """Translate common USASpending API errors into actionable messages."""
     status = e.response.status_code
@@ -62,9 +82,13 @@ def _format_http_error(e: httpx.HTTPStatusError) -> str:
         body = e.response.json()
         detail = body.get("detail") or body.get("messages") or body
     except Exception:
-        detail = e.response.text[:500]
+        detail = _clean_error_body(e.response.text)
 
     detail_str = str(detail)
+    # Also clean detail_str if it somehow contains HTML
+    if "<!doctype html>" in detail_str.lower() or "<html" in detail_str.lower():
+        detail = _clean_error_body(detail_str)
+        detail_str = str(detail)
 
     # Known error patterns with actionable guidance
     if status == 422 and "award_type_codes" in detail_str and "one group" in detail_str:
@@ -148,6 +172,57 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# Shared validators
+# ---------------------------------------------------------------------------
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EARLIEST_SEARCH_DATE = "2007-10-01"
+
+
+def _validate_date(value: str, field_name: str) -> str:
+    """Validate YYYY-MM-DD format and parseability."""
+    if not _DATE_RE.match(value):
+        raise ValueError(
+            f"{field_name} must be in YYYY-MM-DD format (e.g. '2026-01-15'). "
+            f"Got {value!r}. ISO 8601 datetimes with timezones or 'YYYY/MM/DD' are rejected."
+        )
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name}={value!r} is not a valid calendar date: {exc}") from exc
+    return value
+
+
+def _current_fiscal_year() -> int:
+    """Federal fiscal year (Oct-Sep). FY2026 runs 2025-10-01 to 2026-09-30."""
+    today = date.today()
+    return today.year + 1 if today.month >= 10 else today.year
+
+
+def _clamp_limit(limit: int, *, cap: int, field: str = "limit") -> int:
+    """Clamp a limit to valid bounds, raising on nonsense values."""
+    if limit < 1:
+        raise ValueError(f"{field} must be >= 1. Got {limit}.")
+    if limit > cap:
+        raise ValueError(
+            f"{field} exceeds maximum of {cap}. Got {limit}. "
+            f"Paginate with the 'page' parameter instead."
+        )
+    return limit
+
+
+def _coerce_code_list(codes: list[Any] | None, field: str) -> list[str] | None:
+    """Coerce a list of codes (int or str) to strings. Rejects empty arrays."""
+    if codes is None:
+        return None
+    if len(codes) == 0:
+        raise ValueError(
+            f"{field} was passed as an empty array. Omit the parameter instead of passing []."
+        )
+    return [str(c).strip() for c in codes if str(c).strip()]
+
+
+# ---------------------------------------------------------------------------
 # Filter construction helpers
 # ---------------------------------------------------------------------------
 
@@ -176,7 +251,12 @@ def _build_filters(
     """Build a USASpending filters object from flattened parameters."""
     filters: dict[str, Any] = {}
 
-    if keywords:
+    if keywords is not None:
+        if len(keywords) == 0:
+            raise ValueError(
+                "keywords was passed as an empty array. "
+                "Omit the parameter instead of passing []."
+            )
         # USASpending API requires each keyword to be at least 3 characters
         short = [k for k in keywords if len(k) < 3]
         if short:
@@ -219,24 +299,43 @@ def _build_filters(
         filters["recipient_search_text"] = [recipient_name]
     if recipient_uei:
         filters["recipient_id"] = recipient_uei
-    if award_ids:
-        filters["award_ids"] = award_ids
-    if naics_codes:
-        filters["naics_codes"] = naics_codes
-    if psc_codes:
-        filters["psc_codes"] = psc_codes
-    if set_aside_type_codes:
-        filters["set_aside_type_codes"] = set_aside_type_codes
-    if extent_competed_type_codes:
-        filters["extent_competed_type_codes"] = extent_competed_type_codes
-    if contract_pricing_type_codes:
-        filters["contract_pricing_type_codes"] = contract_pricing_type_codes
+    coerced_award_ids = _coerce_code_list(award_ids, "award_ids")
+    if coerced_award_ids:
+        filters["award_ids"] = coerced_award_ids
+    coerced_naics = _coerce_code_list(naics_codes, "naics_codes")
+    if coerced_naics:
+        filters["naics_codes"] = coerced_naics
+    coerced_psc = _coerce_code_list(psc_codes, "psc_codes")
+    if coerced_psc:
+        filters["psc_codes"] = coerced_psc
+    coerced_set_aside = _coerce_code_list(set_aside_type_codes, "set_aside_type_codes")
+    if coerced_set_aside:
+        filters["set_aside_type_codes"] = coerced_set_aside
+    coerced_extent = _coerce_code_list(extent_competed_type_codes, "extent_competed_type_codes")
+    if coerced_extent:
+        filters["extent_competed_type_codes"] = coerced_extent
+    coerced_pricing = _coerce_code_list(contract_pricing_type_codes, "contract_pricing_type_codes")
+    if coerced_pricing:
+        filters["contract_pricing_type_codes"] = coerced_pricing
     if time_period_start or time_period_end:
-        filters["time_period"] = [{
-            "start_date": time_period_start or "2007-10-01",
-            "end_date": time_period_end or "2099-09-30",
-        }]
+        start = _validate_date(time_period_start, "time_period_start") if time_period_start else _EARLIEST_SEARCH_DATE
+        end = _validate_date(time_period_end, "time_period_end") if time_period_end else "2099-09-30"
+        if start > end:
+            raise ValueError(
+                f"time_period_start ({start}) is after time_period_end ({end}). "
+                f"Reverse the values or omit one."
+            )
+        filters["time_period"] = [{"start_date": start, "end_date": end}]
     if award_amount_min is not None or award_amount_max is not None:
+        if (
+            award_amount_min is not None
+            and award_amount_max is not None
+            and award_amount_min > award_amount_max
+        ):
+            raise ValueError(
+                f"award_amount_min ({award_amount_min}) is greater than "
+                f"award_amount_max ({award_amount_max}). Reverse the values."
+            )
         bounds: dict[str, float] = {}
         if award_amount_min is not None:
             bounds["lower_bound"] = award_amount_min
@@ -244,12 +343,19 @@ def _build_filters(
             bounds["upper_bound"] = award_amount_max
         filters["award_amounts"] = [bounds]
     if place_of_performance_state:
+        state = place_of_performance_state.strip().upper()
+        if not re.match(r"^[A-Z]{2}$", state):
+            raise ValueError(
+                f"place_of_performance_state must be a 2-letter USPS code (e.g. 'MD'). "
+                f"Got {place_of_performance_state!r}."
+            )
         filters["place_of_performance_locations"] = [{
             "country": "USA",
-            "state": place_of_performance_state,
+            "state": state,
         }]
-    if def_codes:
-        filters["def_codes"] = def_codes
+    coerced_def = _coerce_code_list(def_codes, "def_codes")
+    if coerced_def:
+        filters["def_codes"] = coerced_def
 
     return filters
 
@@ -325,8 +431,15 @@ async def search_awards(
     - extent_competed_type_codes: A (Full & Open), B, C, D, E, F, G, CDO, NDO
     - contract_pricing_type_codes: J (FFP), Y (T&M), Z (LH), U (CPFF),
       V (CPIF), R (CPAF), L (FP Incentive), M (FP Award Fee)
+
+    IMPORTANT: awarding_agency/funding_agency must be the FULL NAME, not a slug.
+    Use 'Department of the Navy', NOT 'department-of-the-navy'. Slugs silently
+    return zero results. Use list_toptier_agencies() to find exact names.
     """
     codes = _resolve_award_type(award_type)
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
 
     if award_type == "contracts":
         fields = list(DEFAULT_CONTRACT_FIELDS)
@@ -367,7 +480,7 @@ async def search_awards(
 
     payload = {
         "subawards": False,
-        "limit": min(limit, 100),
+        "limit": limit,
         "page": page,
         "sort": sort,
         "order": order,
@@ -405,6 +518,9 @@ async def get_award_count(
     Unlike search_awards, this returns total counts across ALL award categories
     in a single call (not just the one specified in award_type). The award_type
     parameter is ignored here; filters apply to the count query directly.
+
+    At least one filter is required (the API rejects empty filter sets with HTTP 400).
+    Typical usage: pass time_period_start + time_period_end, or a keywords/agency filter.
     """
     filters = _build_filters(
         keywords=keywords,
@@ -423,6 +539,11 @@ async def get_award_count(
         award_amount_max=award_amount_max,
         place_of_performance_state=place_of_performance_state,
     )
+    if not filters:
+        raise ValueError(
+            "get_award_count requires at least one filter. "
+            "Typical: time_period_start + time_period_end, or keywords, or awarding_agency."
+        )
     return await _post("/api/v2/search/spending_by_award_count/", {"filters": filters})
 
 
@@ -446,6 +567,9 @@ async def spending_over_time(
 
     Note: The API returns fiscal_year as a STRING. Cast to int for numeric
     comparisons.
+
+    At least one filter is required (the API rejects empty filter sets with HTTP 400).
+    Typical usage: pass time_period_start + time_period_end.
     """
     award_type_codes = _resolve_award_type(award_type) if award_type else None
     filters = _build_filters(
@@ -459,6 +583,14 @@ async def spending_over_time(
         time_period_start=time_period_start,
         time_period_end=time_period_end,
     )
+    # award_type_codes alone (without other filters) is not enough — the API
+    # treats award_type_codes as a scope, not a filter, and still 400s.
+    has_real_filter = any(k for k in filters if k != "award_type_codes")
+    if not has_real_filter:
+        raise ValueError(
+            "spending_over_time requires at least one filter beyond award_type. "
+            "Typical: time_period_start + time_period_end, or keywords, or awarding_agency."
+        )
     return await _post(
         "/api/v2/search/spending_over_time/",
         {"group": group, "filters": filters},
@@ -498,6 +630,9 @@ async def spending_by_category(
     duplicates (subsidiaries, rebrands, re-registrations). For precise market
     share, apply name normalization to the returned 'name' field.
     """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
     award_type_codes = _resolve_award_type(award_type) if award_type else None
     filters = _build_filters(
         keywords=keywords,
@@ -554,11 +689,14 @@ async def get_transactions(
     Returns per transaction: id, type, action_date, action_type,
     modification_number, description, federal_action_obligation.
     """
+    limit = _clamp_limit(limit, cap=5000)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/transactions/",
         {
             "award_id": generated_award_id,
-            "limit": min(limit, 5000),
+            "limit": limit,
             "page": page,
             "sort": sort,
             "order": order,
@@ -583,6 +721,9 @@ async def get_award_funding(
     Sort fields: reporting_fiscal_date, account_title,
     transaction_obligated_amount, object_class.
     """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/awards/funding/",
         {
@@ -614,6 +755,9 @@ async def get_idv_children(
     'Award ID'), 'obligated_amount' (not 'Award Amount'), and
     'generated_unique_award_id' (not 'generated_internal_id').
     """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
     return await _post(
         "/api/v2/idvs/awards/",
         {
@@ -647,12 +791,19 @@ async def lookup_piid(piid: str, limit: int = 5) -> dict[str, Any]:
     Handy for enriching PRISM, Contract Court, or FPDS exports where you
     have a PIID but don't know whether it's a contract or IDV.
     """
+    piid = (piid or "").strip()
+    if len(piid) < 3:
+        raise ValueError(
+            f"piid must be at least 3 characters (USASpending keyword search minimum). "
+            f"Got {piid!r}."
+        )
+    limit = _clamp_limit(limit, cap=100)
     # Try contracts first via keyword search (more reliable than award_ids filter)
     contracts_result = await _post(
         "/api/v2/search/spending_by_award/",
         {
             "subawards": False,
-            "limit": min(limit, 100),
+            "limit": limit,
             "page": 1,
             "sort": "Award Amount",
             "order": "desc",
@@ -676,7 +827,7 @@ async def lookup_piid(piid: str, limit: int = 5) -> dict[str, Any]:
         "/api/v2/search/spending_by_award/",
         {
             "subawards": False,
-            "limit": min(limit, 100),
+            "limit": limit,
             "page": 1,
             "sort": "Award Amount",
             "order": "desc",
@@ -714,10 +865,21 @@ async def lookup_piid(piid: str, limit: int = 5) -> dict[str, Any]:
 async def autocomplete_psc(search_text: str, limit: int = 10) -> dict[str, Any]:
     """Autocomplete lookup for Product/Service Codes (PSC).
 
-    Works best with code prefixes ('R499', 'D3', 'AJ') or single keywords
+    Works best with code prefixes ('R499', 'D3', 'AJ') or keywords
     ('professional', 'application'). Returns matching PSC entries with
     code and description.
+
+    Minimum 2 characters required. Single-character queries return first-N
+    alphabetical results from the upstream API (useless for matching) and
+    empty strings return HTTP 400.
     """
+    search_text = (search_text or "").strip()
+    if len(search_text) < 2:
+        return {
+            "results": [],
+            "_note": "autocomplete_psc requires at least 2 characters; upstream API returns arbitrary first-N results otherwise.",
+        }
+    limit = _clamp_limit(limit, cap=100)
     return await _post(
         "/api/v2/autocomplete/psc/",
         {"search_text": search_text, "limit": limit},
@@ -725,16 +887,47 @@ async def autocomplete_psc(search_text: str, limit: int = 10) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def autocomplete_naics(search_text: str, limit: int = 10) -> dict[str, Any]:
+async def autocomplete_naics(
+    search_text: str,
+    limit: int = 10,
+    exclude_retired: bool = True,
+) -> dict[str, Any]:
     """Autocomplete lookup for NAICS codes.
 
     Accepts partial codes ('541') or keywords ('software'). Returns matching
     NAICS entries with code and description.
+
+    Minimum 2 characters required. Short queries silently match substrings
+    inside parenthetical notes (e.g. 'x' matches 'except') and produce
+    nonsense results, so we require 2+ chars.
+
+    exclude_retired defaults to True. The upstream NAICS taxonomy still
+    returns codes retired in 2012/2017/2022; these are almost never what
+    callers want. Set exclude_retired=False to include them.
     """
-    return await _post(
+    search_text = (search_text or "").strip()
+    if len(search_text) < 2:
+        return {
+            "results": [],
+            "_note": "autocomplete_naics requires at least 2 characters; upstream substring-matches into parenthetical notes otherwise.",
+        }
+    limit = _clamp_limit(limit, cap=100)
+    # Request more from upstream so the client-side retired filter still yields
+    # enough results. Cap at 50 to avoid runaway.
+    upstream_limit = min(limit * 3, 50) if exclude_retired else limit
+    response = await _post(
         "/api/v2/autocomplete/naics/",
-        {"search_text": search_text, "limit": limit},
+        {"search_text": search_text, "limit": upstream_limit},
     )
+    if exclude_retired:
+        results = response.get("results") or []
+        active = [r for r in results if r.get("year_retired") is None][:limit]
+        response["results"] = active
+        response["_note"] = (
+            f"Filtered {len(results) - len(active)} retired codes. "
+            "Pass exclude_retired=False to include them."
+        )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +944,36 @@ async def list_toptier_agencies() -> dict[str, Any]:
     return await _get("/api/v2/references/toptier_agencies/")
 
 
+def _normalize_toptier(toptier_code: str) -> str:
+    """Normalize a toptier_code: strip, validate numeric, left-pad to 3 digits."""
+    if toptier_code is None:
+        raise ValueError("toptier_code is required.")
+    code = str(toptier_code).strip()
+    if not code or not code.isdigit():
+        raise ValueError(
+            f"toptier_code must be a numeric agency code (e.g. '097'). "
+            f"Got {toptier_code!r}. Use list_toptier_agencies() to find valid codes."
+        )
+    # API expects 3- or 4-digit codes; left-pad shorter numeric inputs to 3.
+    if len(code) < 3:
+        code = code.zfill(3)
+    return code
+
+
+def _validate_fiscal_year(fiscal_year: int) -> int:
+    """Reject fiscal years outside the API's accepted window (2008 .. current FY)."""
+    current = _current_fiscal_year()
+    if fiscal_year < 2008:
+        raise ValueError(
+            f"fiscal_year must be >= 2008 (USASpending data starts FY2008). Got {fiscal_year}."
+        )
+    if fiscal_year > current:
+        raise ValueError(
+            f"fiscal_year must be <= {current} (current FY). Got {fiscal_year}."
+        )
+    return fiscal_year
+
+
 @mcp.tool()
 async def get_agency_overview(
     toptier_code: str,
@@ -759,17 +982,14 @@ async def get_agency_overview(
     """Get summary information for a specific agency in a given fiscal year.
 
     toptier_code is the 3- or 4-digit agency code (e.g. '097' for DoD,
-    '075' for HHS, '080' for NASA). Get valid codes via list_toptier_agencies().
+    '075' for HHS, '080' for NASA). Shorter inputs like '97' are left-padded
+    to '097' automatically. Get valid codes via list_toptier_agencies().
     """
-    if not toptier_code or not toptier_code.strip().isdigit():
-        raise ValueError(
-            f"toptier_code must be a numeric agency code (e.g. '097'). "
-            f"Got {toptier_code!r}. Use list_toptier_agencies() to find valid codes."
-        )
+    code = _normalize_toptier(toptier_code)
     params = {}
     if fiscal_year is not None:
-        params["fiscal_year"] = str(fiscal_year)
-    return await _get(f"/api/v2/agency/{toptier_code.strip()}/", params=params)
+        params["fiscal_year"] = str(_validate_fiscal_year(fiscal_year))
+    return await _get(f"/api/v2/agency/{code}/", params=params)
 
 
 @mcp.tool()
@@ -779,17 +999,14 @@ async def get_agency_awards(
 ) -> dict[str, Any]:
     """Get award summary totals for an agency in a given fiscal year.
 
-    Returns obligation totals by award category.
+    Returns obligation totals by award category. toptier_code is auto-padded
+    to 3 digits if a shorter numeric value is supplied.
     """
-    if not toptier_code or not toptier_code.strip().isdigit():
-        raise ValueError(
-            f"toptier_code must be a numeric agency code (e.g. '097'). "
-            f"Got {toptier_code!r}."
-        )
+    code = _normalize_toptier(toptier_code)
     params = {}
     if fiscal_year is not None:
-        params["fiscal_year"] = str(fiscal_year)
-    return await _get(f"/api/v2/agency/{toptier_code.strip()}/awards/", params=params)
+        params["fiscal_year"] = str(_validate_fiscal_year(fiscal_year))
+    return await _get(f"/api/v2/agency/{code}/awards/", params=params)
 
 
 @mcp.tool()

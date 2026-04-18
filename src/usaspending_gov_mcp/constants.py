@@ -4,7 +4,7 @@
 
 BASE_URL = "https://api.usaspending.gov"
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "usaspending-gov-mcp/0.1.3"
+USER_AGENT = "usaspending-gov-mcp/0.2.0"
 
 # Award type code groups. These MUST NOT be mixed in a single request
 # (the API returns HTTP 422 otherwise).
