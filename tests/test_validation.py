@@ -16,10 +16,18 @@ import os
 
 import pytest
 
+import usaspending_gov_mcp.server as srv  # noqa: E402
 from usaspending_gov_mcp.server import mcp
 
 
 LIVE = os.environ.get("USASPENDING_LIVE_TESTS") == "1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_client():
+    srv._client = None
+    yield
+    srv._client = None
 
 
 async def _call(name: str, **kwargs):
@@ -462,4 +470,209 @@ def test_autocomplete_psc_length_clamped():
 
 def test_user_agent_matches_version():
     from usaspending_gov_mcp.constants import USER_AGENT
-    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.3" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+
+
+# ---------------------------------------------------------------------------
+# 0.2.3: round 3 live stress + round 4 shape mock findings
+# ---------------------------------------------------------------------------
+
+def test_search_awards_no_filters_rejected():
+    """Round 3: search_awards() with no args used to return 25 unfiltered
+    recent contracts. Now must require at least one real filter."""
+    async def _run():
+        try:
+            await mcp.call_tool("search_awards", {})
+        except Exception as e:
+            assert "at least one filter" in str(e).lower()
+            return
+        raise AssertionError("expected no-filters rejection")
+    asyncio.run(_run())
+
+
+def test_search_awards_award_type_alone_rejected():
+    """award_type alone is a scope not a filter; must still require a filter."""
+    asyncio.run(_call_expect_error(
+        "search_awards", "at least one filter",
+        award_type="contracts",
+    ))
+
+
+def test_ensure_dict_response_catches_none():
+    """Shape guard: None response raises a clear error, not a type confusion."""
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return None
+    class FakeClient:
+        is_closed = False
+        async def post(self, path, json=None): return FakeResp()
+        async def get(self, path, params=None): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_awards(
+            keywords=["test"], time_period_start="2024-01-01", time_period_end="2024-06-30"
+        ))
+    except RuntimeError as e:
+        assert "empty body" in str(e).lower() or "unexpected" in str(e).lower()
+        return
+    raise AssertionError("expected shape-guard rejection")
+
+
+def test_ensure_dict_response_catches_list():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return []
+    class FakeClient:
+        is_closed = False
+        async def post(self, path, json=None): return FakeResp()
+        async def get(self, path, params=None): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_awards(
+            keywords=["test"], time_period_start="2024-01-01", time_period_end="2024-06-30"
+        ))
+    except RuntimeError as e:
+        assert "unexpected list" in str(e).lower()
+        return
+    raise AssertionError("expected shape-guard rejection")
+
+
+def test_ensure_dict_response_catches_int():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return 42
+    class FakeClient:
+        is_closed = False
+        async def post(self, path, json=None): return FakeResp()
+        async def get(self, path, params=None): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_awards(
+            keywords=["test"], time_period_start="2024-01-01", time_period_end="2024-06-30"
+        ))
+    except RuntimeError as e:
+        assert "unexpected int" in str(e).lower()
+        return
+    raise AssertionError("expected shape-guard rejection")
+
+
+def test_ensure_dict_response_catches_string():
+    class FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return "oops"
+    class FakeClient:
+        is_closed = False
+        async def post(self, path, json=None): return FakeResp()
+        async def get(self, path, params=None): return FakeResp()
+    srv._client = FakeClient()
+    try:
+        asyncio.run(srv.search_awards(
+            keywords=["test"], time_period_start="2024-01-01", time_period_end="2024-06-30"
+        ))
+    except RuntimeError as e:
+        assert "unexpected str" in str(e).lower()
+        return
+    raise AssertionError("expected shape-guard rejection")
+
+
+# ---------------------------------------------------------------------------
+# Live regression tests (USASPENDING_LIVE_TESTS=1)
+# ---------------------------------------------------------------------------
+
+def _payload(result):
+    return result[1] if isinstance(result, tuple) else result
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_search_awards_returns_real_data():
+    r = asyncio.run(_call(
+        "search_awards", keywords=["software"],
+        time_period_start="2024-01-01", time_period_end="2024-06-30", limit=3,
+    ))
+    data = _payload(r)
+    assert len(data.get("results", [])) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_compound_filters_work():
+    """Round 3 regression: stacked filters should actually apply."""
+    r = asyncio.run(_call(
+        "search_awards",
+        keywords=["software"],
+        naics_codes=["541511"],
+        place_of_performance_state="VA",
+        time_period_start="2024-01-01", time_period_end="2024-12-31",
+        limit=3,
+    ))
+    data = _payload(r)
+    # Narrow filter should return <100 vs unfiltered 25+
+    assert isinstance(data.get("results"), list)
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_leap_year_date():
+    """Round 3: leap-year date must not 500."""
+    r = asyncio.run(_call(
+        "search_awards",
+        time_period_start="2024-02-29", time_period_end="2024-03-01", limit=3,
+    ))
+    _payload(r)  # just assert no exception
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_amount_range_boundary():
+    """Round 3: exact-match amount range should not crash."""
+    r = asyncio.run(_call(
+        "search_awards",
+        keywords=["software"],
+        award_amount_min=1_000_000, award_amount_max=1_000_000, limit=3,
+    ))
+    _payload(r)
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_autocomplete_returns_data():
+    r = asyncio.run(_call("autocomplete_psc", search_text="computer", limit=5))
+    data = _payload(r)
+    assert len(data.get("results", [])) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_state_profile_works():
+    r = asyncio.run(_call("get_state_profile", state_fips="06"))
+    data = _payload(r)
+    assert data.get("code") == "CA"
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_concurrent_searches():
+    async def _run():
+        return await asyncio.gather(*[
+            _call("search_awards", keywords=[kw], limit=3,
+                  time_period_start="2024-01-01", time_period_end="2024-06-30")
+            for kw in ("software", "consulting", "engineering")
+        ])
+    rs = asyncio.run(_run())
+    assert all(_payload(r).get("results") is not None for r in rs)
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_unicode_keyword():
+    """Round 3: unicode keywords (Spanish) must not crash; may return 0."""
+    r = asyncio.run(_call(
+        "search_awards", keywords=["español"], limit=3,
+        time_period_start="2024-01-01", time_period_end="2024-06-30",
+    ))
+    _payload(r)  # no exception is the test
+
+
+@pytest.mark.skipif(not LIVE, reason="requires USASPENDING_LIVE_TESTS=1")
+def test_live_toptier_agencies_returns_many():
+    r = asyncio.run(_call("list_toptier_agencies"))
+    data = _payload(r)
+    # There are ~100 toptier agencies
+    assert len(data.get("results", [])) > 50

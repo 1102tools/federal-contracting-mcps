@@ -147,12 +147,32 @@ def _format_http_error(e: httpx.HTTPStatusError) -> str:
     return f"HTTP {status}: {detail}"
 
 
+def _ensure_dict_response(data: Any, *, path: str) -> dict[str, Any]:
+    """Guarantee a dict return type. USASpending always responds with a
+    JSON object for every endpoint this MCP uses; anything else is a
+    transport/infrastructure problem that should surface clearly rather
+    than leak a None / list / int into the tool output.
+    """
+    if isinstance(data, dict):
+        return data
+    if data is None:
+        raise RuntimeError(
+            f"USASpending returned an empty body at {path!r}. This usually "
+            f"means a CDN / proxy issue rather than a real empty result; "
+            f"retry in a few seconds."
+        )
+    raise RuntimeError(
+        f"USASpending returned an unexpected {type(data).__name__} at "
+        f"{path!r} (expected JSON object). First 200 chars: {str(data)[:200]!r}"
+    )
+
+
 async def _post(path: str, json: dict[str, Any]) -> dict[str, Any]:
     """POST helper with actionable error translation."""
     try:
         r = await _get_client().post(path, json=json)
         r.raise_for_status()
-        return r.json()
+        return _ensure_dict_response(r.json(), path=path)
     except httpx.HTTPStatusError as e:
         raise RuntimeError(_format_http_error(e)) from e
     except httpx.RequestError as e:
@@ -164,7 +184,7 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
     try:
         r = await _get_client().get(path, params=params or {})
         r.raise_for_status()
-        return r.json()
+        return _ensure_dict_response(r.json(), path=path)
     except httpx.HTTPStatusError as e:
         raise RuntimeError(_format_http_error(e)) from e
     except httpx.RequestError as e:
@@ -532,6 +552,18 @@ async def search_awards(
         award_amount_max=award_amount_max,
         place_of_performance_state=place_of_performance_state,
     )
+    # award_type_codes is always present because we always set it, but it's
+    # a scope not a filter. Require at least one real filter so that empty
+    # calls don't silently return unfiltered recent awards.
+    real_filter_keys = [k for k in filters if k != "award_type_codes"]
+    if not real_filter_keys:
+        raise ValueError(
+            "search_awards requires at least one filter beyond award_type. "
+            "Typical: keywords + time_period_start/end, or recipient_name, "
+            "or awarding_agency, or naics_codes, or psc_codes. Calling "
+            "without filters silently returns recent awards and is usually "
+            "a typo in parameter names."
+        )
 
     payload = {
         "subawards": False,

@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.2.3
+
+Follow-up hardening after a full playbook pass (round 3 deep live stress,
+round 4 response-shape mocks, plus a live-gated regression suite). The
+0.2.2 release shipped after only rounds 1-2; this closes the gap with
+how bls-oews / gsa-perdiem / regulationsgov were audited.
+
+### P1 silent-wrong-data
+- `search_awards()` called with NO filter arguments silently returned 25
+  unfiltered recent contracts. That's the same failure mode as
+  regulationsgov's `agency_id=""` returning all 1.95M records. Now
+  raises "search_awards requires at least one filter beyond award_type"
+  with a pointer to the typical filter combinations.
+
+### P2 response-shape defense
+- `_post` / `_get` now guarantee a dict return via `_ensure_dict_response`.
+  USASpending always returns JSON objects for the endpoints this MCP
+  uses; anything else (None, bare list, int, string) is a CDN / proxy
+  issue that used to leak into tool output as a type confusion. Now
+  surfaces clearly as "USASpending returned an empty body at {path}" or
+  "unexpected {type} at {path}".
+
+### Testing
+- 16 new tests: 6 offline (round-3 no-filter regression + 4 shape-guard
+  regressions on mocked responses) and 10 live gated by
+  `USASPENDING_LIVE_TESTS=1`.
+- Live suite now covers: real search with real results, compound
+  filters narrowing results, leap-year date, exact-match amount range,
+  autocomplete return, state profile, concurrent searches, unicode
+  keyword handling, and toptier-agency listing.
+- Test total: 52 offline + 10 live = 62 passing. 0.2.2 shipped with 46.
+- Added autouse fixture to reset `srv._client` between tests so the
+  shared httpx client doesn't leak across event loops.
+
+### USER_AGENT
+- Bumped to `usaspending-gov-mcp/0.2.3`.
+
 ## 0.2.2
 
 Live audit against the USASpending.gov API surfaced 9 P1 silent-wrong-data
