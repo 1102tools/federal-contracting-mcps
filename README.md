@@ -20,9 +20,27 @@ Exposes the Regulations.gov API as 8 MCP tools:
 - `open_comment_periods` - Currently open comment periods across procurement agencies
 - `far_case_history` - Full lifecycle of a FAR/DFARS rulemaking case
 
-## Authentication (optional)
+## Get your own API key (strongly recommended)
 
-Works with DEMO_KEY (40 req/hr). Register free at [open.gsa.gov](https://open.gsa.gov/api/regulationsgov/#getting-started) for 1,000 req/hr.
+This server hits `api.regulations.gov`, which uses api.data.gov for rate
+limiting.
+
+- **Without a key**: falls back to the shared `DEMO_KEY` which is capped at
+  **40 requests per hour across everyone using it**. A single
+  `open_comment_periods` scan across 8 agencies already uses 8 of those 40,
+  so you'll hit 429 errors within a couple of prompts.
+- **With a personal key**: 1,000 requests per hour, yours alone.
+
+**Get a free key (takes 30 seconds):**
+
+1. Go to [open.gsa.gov/api/regulationsgov/#getting-started](https://open.gsa.gov/api/regulationsgov/#getting-started) (or directly at [api.data.gov/signup](https://api.data.gov/signup/))
+2. Enter your name and email — no approval, no wait
+3. Copy the key from the confirmation page
+4. Paste it into your Claude Desktop config as `REGULATIONS_GOV_API_KEY` (see below)
+
+The same api.data.gov key works for every api.data.gov-backed API
+(Regulations.gov, GSA Per Diem, NASA, FEC, FCC, etc.), so if you already
+have one for another 1102tools MCP you can reuse it.
 
 ## Installation
 
@@ -32,19 +50,7 @@ uvx regulationsgov-mcp
 
 ## Claude Desktop configuration
 
-Without key:
-```json
-{
-  "mcpServers": {
-    "regulationsgov": {
-      "command": "uvx",
-      "args": ["regulationsgov-mcp"]
-    }
-  }
-}
-```
-
-With key:
+**Recommended (with your own key):**
 ```json
 {
   "mcpServers": {
@@ -52,8 +58,20 @@ With key:
       "command": "uvx",
       "args": ["regulationsgov-mcp"],
       "env": {
-        "REGULATIONS_GOV_API_KEY": "your-api-key"
+        "REGULATIONS_GOV_API_KEY": "paste-your-api-data-gov-key-here"
       }
+    }
+  }
+}
+```
+
+**Without a key** (works for a handful of calls per hour, then 429s until the hour rolls over):
+```json
+{
+  "mcpServers": {
+    "regulationsgov": {
+      "command": "uvx",
+      "args": ["regulationsgov-mcp"]
     }
   }
 }

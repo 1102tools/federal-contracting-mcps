@@ -1,0 +1,39 @@
+name: Publish to PyPI
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with: {version: "latest"}
+      - run: uv python install 3.12
+      - run: uv sync --dev
+      - run: uv run pytest tests/test_validation.py -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with: {version: "latest"}
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with: {name: dist, path: dist/}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/regulationsgov-mcp/
+    permissions: {id-token: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: dist, path: dist/}
+      - uses: pypa/gh-action-pypi-publish@release/v1
