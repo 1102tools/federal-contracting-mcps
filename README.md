@@ -4,6 +4,8 @@ MCP server for the Regulations.gov API. Federal rulemaking dockets, proposed rul
 
 Optional free API key for higher rate limits.
 
+*Tested and hardened through three rounds of integration testing against the live Regulations.gov API. 51 regression tests covering 1 P0 catastrophic bug, 10 P1 silent-wrong-data bugs (including `agency_id=""` returning all 1,951,938 records), and 7 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the Regulations.gov API as 8 MCP tools:
