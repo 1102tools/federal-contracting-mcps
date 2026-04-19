@@ -4,6 +4,8 @@ MCP server for the BLS Occupational Employment and Wage Statistics (OEWS) API. M
 
 Optional free API key for higher rate limits. Works without a key at reduced limits.
 
+*Tested and hardened through a 5-round retroactive live audit with a real BLS API key after the initial smoke test reported zero bugs. 60 regression tests covering 1 P0 usability-breaking bug (SOC format), 10 P1 silent-wrong-data bugs, 12 P1 response-shape crash paths, and 7 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the BLS OEWS API as 7 MCP tools:
