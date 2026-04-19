@@ -4,6 +4,8 @@ MCP server for the GSA CALC+ Labor Ceiling Rates API. Query awarded GSA MAS sche
 
 No authentication required. Works with any MCP-compatible client.
 
+*Tested and hardened through four retroactive live audit rounds against the GSA CALC+ API. 117 regression tests covering 49 P1 bugs (19 crashes, 30 silent-wrong-data) and 19 P2 validation gaps fixed, plus 12 retroactive deep-audit findings. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the GSA CALC+ API as 8 MCP tools:
