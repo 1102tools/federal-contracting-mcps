@@ -4,6 +4,8 @@ MCP server for the eCFR (Electronic Code of Federal Regulations) API. Read FAR, 
 
 Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
 
+*Tested and hardened through five rounds of integration testing against the live eCFR API. 101 regression tests covering 2 P0 catastrophic bugs, 26 P1 silent-wrong-data bugs, and 32 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the eCFR API as 13 MCP tools covering regulatory text, structure, search, version history, and common acquisition workflows:
