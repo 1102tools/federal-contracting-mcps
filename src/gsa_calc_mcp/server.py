@@ -22,6 +22,8 @@ from typing import Any, Literal, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import BeforeValidator
+from typing_extensions import Annotated
 
 from .constants import (
     BASE_URL,
@@ -101,6 +103,31 @@ _WAF_PATTERNS = [
     (re.compile(r"\x00"), "null byte"),
 ]
 
+# Control chars (null byte, newline, tab, CR, backspace, etc.). These reach
+# the GSA API URL-encoded and produce silent zero-result queries when they
+# were unintentional (copy-paste artifacts, accidental whitespace). Check
+# BEFORE strip(), which would eat \n/\r/\t and hide the problem.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _validate_no_control_chars(value: Any, *, field: str) -> Any:
+    """Reject strings containing control characters.
+
+    Must be called BEFORE any strip() -- strip() eats \\n, \\r, \\t and masks
+    the problem, while the downstream API still sees URL-encoded control
+    chars from the internal portion of multi-line input.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and _CONTROL_CHARS_RE.search(value):
+        raise ValueError(
+            f"{field}={value!r} contains control characters "
+            f"(null byte / newline / tab / CR / backspace). These typically come "
+            f"from copy-paste artifacts and cause silent zero-result queries. "
+            f"Remove them and retry."
+        )
+    return value
+
 
 def _validate_waf_safe(value: str | None, *, field: str) -> str | None:
     """Reject strings containing characters that trigger GSA's WAF."""
@@ -116,6 +143,32 @@ def _validate_waf_safe(value: str | None, *, field: str) -> str | None:
                 f"characters and try again (empirically: quotes, SQL keywords, "
                 f"angle brackets, path traversal, semicolons all trigger 403/503)."
             )
+    return value
+
+
+def _validate_finite(value: float | int | None, *, field: str) -> float | int | None:
+    """Reject NaN/Inf in numeric fields. pydantic's `float` type accepts both."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a number, not a boolean. Got {value!r}.")
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        raise ValueError(
+            f"{field} must be a finite number. Got {value!r}. "
+            f"NaN/Inf reach the API URL-encoded and return HTTP 406."
+        )
+    return value
+
+
+def _clamp_text_len(value: str | None, *, field: str, maximum: int = 500) -> str | None:
+    """Length-check free-text fields. GSA returns 406 on >500-char strings."""
+    if value is None:
+        return None
+    if len(value) > maximum:
+        raise ValueError(
+            f"{field} exceeds {maximum} chars ({len(value)}). Very long strings "
+            f"trigger HTTP 406 URI-too-long errors from GSA."
+        )
     return value
 
 
@@ -135,6 +188,44 @@ def _clamp(value: int, *, field: str, lo: int, hi: int) -> int:
             f"{field} exceeds maximum of {hi}. Got {value}. Paginate instead."
         )
     return value
+
+
+# GSA CALC is backed by Elasticsearch with a 10,000-result window
+# (index.max_result_window default). Requests where page * page_size > 10,000
+# return HTTP 406. Pre-clamp locally with a clear message instead of
+# round-tripping to a cryptic API error.
+_ES_MAX_WINDOW = 10_000
+
+
+def _validate_es_window(page: int, page_size: int) -> None:
+    if page * page_size > _ES_MAX_WINDOW:
+        raise ValueError(
+            f"page ({page}) * page_size ({page_size}) = {page * page_size} exceeds "
+            f"GSA CALC+'s 10,000-result Elasticsearch window. Narrow your search "
+            f"with filters (education_level, sin, price_range) to get under 10k results, "
+            f"or use suggest_contains() to find exact vendor/category names first."
+        )
+
+
+def _attach_pagination_flags(response: dict[str, Any], *, page: int, page_size: int, total: int | None) -> dict[str, Any]:
+    """Mark responses that are empty because we paged past the end vs truly no data.
+
+    Without this, an empty 'hits' on page 100 of a 50-record query looks the same
+    as a zero-match query, and callers mistakenly conclude there's no market data.
+    """
+    if not isinstance(response, dict):
+        return response
+    if not isinstance(total, int) or total <= 0:
+        return response
+    offset = (page - 1) * page_size
+    if offset >= total:
+        last_page = max(1, (total + page_size - 1) // page_size)
+        response["paged_past_end"] = True
+        response["paged_past_end_reason"] = (
+            f"No data on page {page}; last page with data is page {last_page} "
+            f"({total} total records at page_size {page_size})."
+        )
+    return response
 
 
 def _validate_ordering(value: str | None) -> str:
@@ -196,13 +287,44 @@ def _validate_worksite(value: str | None) -> str | None:
     return match
 
 
+def _reject_bool_pre(value: Any) -> Any:
+    """pydantic BeforeValidator that rejects booleans before Union coercion.
+
+    Needed because `Union[str, int, None]` accepts bool (True/False) and
+    coerces to int 1/0 before our server-side validator runs. The coerced
+    value passes the alphanumeric regex and reaches the API as 'sin:1' /
+    'sin:0', silently producing zero-match queries.
+    """
+    if isinstance(value, bool):
+        raise ValueError(
+            f"Expected a string or int, not a boolean. Got {value!r}. "
+            f"This usually means the caller passed the wrong argument type."
+        )
+    return value
+
+
+SinInput = Annotated[Union[str, int, None], BeforeValidator(_reject_bool_pre)]
+
+
 def _validate_sin(value: Any) -> str | None:
     """SIN codes are alphanumeric (e.g., '54151S', '541330ENG'). No special chars."""
     if value is None:
         return None
+    # Reject booleans explicitly: True/False coerce via int to "1"/"0" and
+    # pass the alphanumeric regex, silently producing a zero-match query.
+    if isinstance(value, bool):
+        raise ValueError(
+            f"sin={value!r} is a boolean, not a SIN. "
+            f"Pass a string like '54151S' or an int like 541611."
+        )
     s = str(value).strip()
     if not s:
         return None
+    if len(s) > 20:
+        raise ValueError(
+            f"sin={value!r} exceeds 20 chars ({len(s)}). Real SINs are <=10 chars "
+            f"(e.g. '54151S', '541330ENG')."
+        )
     if not re.match(r"^[A-Za-z0-9]+$", s):
         raise ValueError(
             f"sin={value!r} must be alphanumeric (e.g. '54151S', '541330ENG'). "
@@ -212,6 +334,8 @@ def _validate_sin(value: Any) -> str | None:
 
 
 def _validate_experience_range(emin: int | None, emax: int | None) -> tuple[int | None, int | None]:
+    emin = _validate_finite(emin, field="experience_min")
+    emax = _validate_finite(emax, field="experience_max")
     if emin is not None and emin < 0:
         raise ValueError(f"experience_min must be >= 0. Got {emin}.")
     if emax is not None and emax < 0:
@@ -224,6 +348,8 @@ def _validate_experience_range(emin: int | None, emax: int | None) -> tuple[int 
 
 
 def _validate_price_range(pmin: float | None, pmax: float | None) -> tuple[float | None, float | None]:
+    pmin = _validate_finite(pmin, field="price_min")
+    pmax = _validate_finite(pmax, field="price_max")
     if pmin is not None and pmin < 0:
         raise ValueError(f"price_min must be >= 0. Got {pmin}.")
     if pmax is not None and pmax < 0:
@@ -545,7 +671,7 @@ async def keyword_search(
     price_max: float | None = None,
     business_size: Literal["S", "O"] | None = None,
     security_clearance: Literal["yes", "no"] | None = None,
-    sin: Union[str, int, None] = None,
+    sin: SinInput = None,
     worksite: str | None = None,
     page: int = 1,
     page_size: int = 100,
@@ -582,19 +708,17 @@ async def keyword_search(
 
     exclude: pipe-delimited hit _id values to exclude from results and stats.
     """
+    _validate_no_control_chars(keyword, field="keyword")
     keyword = _strip_or_none(keyword)
     if keyword is None:
         raise ValueError(
             "keyword cannot be empty. For unfiltered browsing use filtered_browse() instead."
         )
+    keyword = _clamp_text_len(keyword, field="keyword", maximum=500)
     keyword = _validate_waf_safe(keyword, field="keyword")
-    if len(keyword) > 500:
-        raise ValueError(
-            f"keyword exceeds 500 chars ({len(keyword)}). Very long keywords trigger "
-            f"HTTP 406 URI-too-long errors."
-        )
     page = _clamp(page, field="page", lo=1, hi=100_000)
     page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    _validate_es_window(page, page_size)
     experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
     price_min, price_max = _validate_price_range(price_min, price_max)
     education_level = _validate_education_level(education_level)
@@ -602,7 +726,10 @@ async def keyword_search(
     sin = _validate_sin(sin)
     ordering = _validate_ordering(ordering)
     sort = _validate_sort(sort)
+    _validate_no_control_chars(exclude, field="exclude")
     exclude = _strip_or_none(exclude)
+    exclude = _clamp_text_len(exclude, field="exclude", maximum=500)
+    exclude = _validate_waf_safe(exclude, field="exclude")
 
     filters = _build_filters(
         education_level=education_level, experience_min=experience_min,
@@ -615,7 +742,9 @@ async def keyword_search(
         ordering=ordering, sort=sort, exclude=exclude,
     )
     data = await _get(qs)
-    return {**data, "_stats": _extract_stats(data)}
+    stats = _extract_stats(data)
+    result = {**data, "_stats": stats}
+    return _attach_pagination_flags(result, page=page, page_size=page_size, total=stats.get("total_rates"))
 
 
 @mcp.tool()
@@ -641,14 +770,15 @@ async def exact_search(
 
     Fields: labor_category, vendor_name, idv_piid (GSA MAS contract number).
     """
+    _validate_no_control_chars(value, field="value")
     value = _strip_or_none(value)
     if value is None:
         raise ValueError("value cannot be empty. Use suggest_contains() to discover valid values.")
+    value = _clamp_text_len(value, field="value", maximum=500)
     value = _validate_waf_safe(value, field="value")
-    if len(value) > 500:
-        raise ValueError(f"value exceeds 500 chars. Got {len(value)}.")
     page = _clamp(page, field="page", lo=1, hi=100_000)
     page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    _validate_es_window(page, page_size)
     experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
     price_min, price_max = _validate_price_range(price_min, price_max)
     education_level = _validate_education_level(education_level)
@@ -665,7 +795,9 @@ async def exact_search(
         page=page, page_size=page_size, ordering=ordering, sort=sort,
     )
     data = await _get(qs)
-    return {**data, "_stats": _extract_stats(data)}
+    stats = _extract_stats(data)
+    result = {**data, "_stats": stats}
+    return _attach_pagination_flags(result, page=page, page_size=page_size, total=stats.get("total_rates"))
 
 
 @mcp.tool()
@@ -684,11 +816,13 @@ async def suggest_contains(
     1. suggest_contains('vendor_name', 'booz') -> finds 'Booz Allen Hamilton Inc.'
     2. exact_search('vendor_name', 'Booz Allen Hamilton Inc.') -> all their rates
     """
+    _validate_no_control_chars(term, field="term")
     term = _strip_or_none(term)
     if term is None or len(term) < 2:
         raise ValueError(
             "suggest_contains requires at least 2 non-whitespace characters."
         )
+    term = _clamp_text_len(term, field="term", maximum=500)
     term = _validate_waf_safe(term, field="term")
 
     qs = _build_query_string(suggest_field=field, suggest_term=term)
@@ -729,7 +863,7 @@ async def filtered_browse(
     price_max: float | None = None,
     business_size: Literal["S", "O"] | None = None,
     security_clearance: Literal["yes", "no"] | None = None,
-    sin: Union[str, int, None] = None,
+    sin: SinInput = None,
     worksite: str | None = None,
     page: int = 1,
     page_size: int = 100,
@@ -744,6 +878,7 @@ async def filtered_browse(
     """
     page = _clamp(page, field="page", lo=1, hi=100_000)
     page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
+    _validate_es_window(page, page_size)
     experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
     price_min, price_max = _validate_price_range(price_min, price_max)
     education_level = _validate_education_level(education_level)
@@ -758,12 +893,23 @@ async def filtered_browse(
         business_size=business_size, security_clearance=security_clearance,
         sin=sin, worksite=worksite,
     )
+    # GSA CALC returns 265k+ records for an unfiltered browse; callers who
+    # omit all filters almost always meant to pass something. Require at
+    # least one filter to prevent silent unbounded-default responses.
+    if not filters:
+        raise ValueError(
+            "filtered_browse requires at least one filter. Typical filters: "
+            "education_level='MA', experience_min=5, sin='54151S', "
+            "business_size='S', price_min=50. For keyword search use keyword_search()."
+        )
     qs = _build_query_string(
         filters=filters, page=page, page_size=page_size,
         ordering=ordering, sort=sort,
     )
     data = await _get(qs)
-    return {**data, "_stats": _extract_stats(data)}
+    stats = _extract_stats(data)
+    result = {**data, "_stats": stats}
+    return _attach_pagination_flags(result, page=page, page_size=page_size, total=stats.get("total_rates"))
 
 
 # ---------------------------------------------------------------------------
@@ -777,7 +923,7 @@ async def igce_benchmark(
     experience_min: int | None = None,
     experience_max: int | None = None,
     business_size: Literal["S", "O"] | None = None,
-    sin: Union[str, int, None] = None,
+    sin: SinInput = None,
 ) -> dict[str, Any]:
     """Get ceiling rate benchmarks for IGCE development.
 
@@ -792,9 +938,11 @@ async def igce_benchmark(
     Reminder: these are ceiling rates (max a contractor can charge), not
     prices paid. Actual task order rates should be lower per FAR 8.405-2(d).
     """
+    _validate_no_control_chars(labor_category, field="labor_category")
     labor_category = _strip_or_none(labor_category)
     if labor_category is None:
         raise ValueError("labor_category cannot be empty.")
+    labor_category = _clamp_text_len(labor_category, field="labor_category", maximum=500)
     labor_category = _validate_waf_safe(labor_category, field="labor_category")
     experience_min, experience_max = _validate_experience_range(experience_min, experience_max)
     education_level = _validate_education_level(education_level)
@@ -840,6 +988,11 @@ async def price_reasonableness_check(
     """
     if not isinstance(proposed_rate, (int, float)) or isinstance(proposed_rate, bool):
         raise ValueError("proposed_rate must be a positive number.")
+    if isinstance(proposed_rate, float) and (math.isnan(proposed_rate) or math.isinf(proposed_rate)):
+        raise ValueError(
+            f"proposed_rate must be a finite number. Got {proposed_rate!r}. "
+            f"NaN comparisons fall through to 'above P75' / 'equal' silently."
+        )
     if proposed_rate <= 0:
         raise ValueError(f"proposed_rate must be > 0. Got {proposed_rate}.")
 
@@ -916,9 +1069,11 @@ async def vendor_rate_card(
     with the most rate records and returns a _candidates list so the caller
     can re-query with a more specific term if needed.
     """
+    _validate_no_control_chars(vendor_name, field="vendor_name")
     vendor_name = _strip_or_none(vendor_name)
     if vendor_name is None or len(vendor_name) < 2:
         raise ValueError("vendor_name must be at least 2 non-whitespace characters.")
+    vendor_name = _clamp_text_len(vendor_name, field="vendor_name", maximum=500)
     vendor_name = _validate_waf_safe(vendor_name, field="vendor_name")
     page_size = _clamp(page_size, field="page_size", lo=1, hi=MAX_PAGE_SIZE)
     ordering = _validate_ordering(ordering)
@@ -992,7 +1147,7 @@ async def vendor_rate_card(
 
 @mcp.tool()
 async def sin_analysis(
-    sin_code: Union[str, int],
+    sin_code: Annotated[Union[str, int], BeforeValidator(_reject_bool_pre)],
     page_size: int = 100,
 ) -> dict[str, Any]:
     """Get rate distribution and statistics for a specific SIN.

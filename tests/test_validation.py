@@ -21,6 +21,16 @@ from gsa_calc_mcp.server import mcp  # noqa: E402
 LIVE = os.environ.get("GSA_CALC_LIVE_TESTS") == "1"
 
 
+@pytest.fixture(autouse=True)
+def _reset_client():
+    """httpx.AsyncClient gets bound to an asyncio loop; reusing across
+    asyncio.run() invocations raises 'Event loop is closed'. Reset per-test."""
+    import gsa_calc_mcp.server as S
+    S._client = None
+    yield
+    S._client = None
+
+
 async def _call(name: str, **kwargs):
     return await mcp.call_tool(name, kwargs)
 
@@ -706,15 +716,6 @@ def test_price_reasonableness_vs_median_unknown_when_missing():
 
 
 # ---------------------------------------------------------------------------
-# USER_AGENT currency
-# ---------------------------------------------------------------------------
-
-def test_user_agent_matches_version():
-    from gsa_calc_mcp.constants import USER_AGENT
-    assert "0.2.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
-
-
-# ---------------------------------------------------------------------------
 # Live tests (opt-in)
 # ---------------------------------------------------------------------------
 
@@ -748,3 +749,355 @@ def test_unknown_param_rejected():
             return
         raise AssertionError("expected extra-param rejection")
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 0.2.2: live-audit regressions
+# ---------------------------------------------------------------------------
+
+# F1: control chars in free-text fields. Previously \n/\r/\t/\b slipped
+# through because _strip_or_none eats leading/trailing whitespace but not
+# internal control chars, and _validate_waf_safe only checked null byte.
+def test_keyword_newline_rejected():
+    asyncio.run(_call_expect_error("keyword_search", "control characters", keyword="a\nb"))
+
+
+def test_keyword_tab_rejected():
+    asyncio.run(_call_expect_error("keyword_search", "control characters", keyword="a\tb"))
+
+
+def test_keyword_cr_rejected():
+    asyncio.run(_call_expect_error("keyword_search", "control characters", keyword="a\rb"))
+
+
+def test_keyword_backspace_rejected():
+    asyncio.run(_call_expect_error("keyword_search", "control characters", keyword="a\x08b"))
+
+
+def test_exact_search_value_newline_rejected():
+    asyncio.run(_call_expect_error(
+        "exact_search", "control characters",
+        field="labor_category", value="a\nb"
+    ))
+
+
+def test_suggest_contains_term_newline_rejected():
+    asyncio.run(_call_expect_error(
+        "suggest_contains", "control characters",
+        field="labor_category", term="a\nb"
+    ))
+
+
+def test_igce_benchmark_labor_category_newline_rejected():
+    asyncio.run(_call_expect_error(
+        "igce_benchmark", "control characters", labor_category="a\nb"
+    ))
+
+
+def test_vendor_rate_card_vendor_name_newline_rejected():
+    asyncio.run(_call_expect_error(
+        "vendor_rate_card", "control characters", vendor_name="a\nb"
+    ))
+
+
+def test_exclude_newline_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "control characters", keyword="dev", exclude="a\nb"
+    ))
+
+
+def test_exclude_null_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "control characters", keyword="dev", exclude="a\x00b"
+    ))
+
+
+# F2: exclude param not WAF-checked locally, round-tripped to GSA.
+def test_exclude_angle_brackets_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "firewall", keyword="dev", exclude="<script>"
+    ))
+
+
+def test_exclude_path_traversal_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "firewall", keyword="dev", exclude="../etc"
+    ))
+
+
+def test_exclude_too_long():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "exclude exceeds", keyword="dev", exclude="x"*600
+    ))
+
+
+# F3: filtered_browse with no filters returned 265k unfiltered records.
+def test_filtered_browse_no_filters_rejected():
+    asyncio.run(_call_expect_error(
+        "filtered_browse", "at least one filter"
+    ))
+
+
+def test_filtered_browse_one_filter_ok():
+    """One filter should satisfy the guard -- don't break legit browsing."""
+    from gsa_calc_mcp.server import _build_filters
+    # Proof the guard is filter-count-based: _build_filters with just
+    # education_level produces one entry.
+    assert _build_filters(education_level="PHD") == ["education_level:PHD"]
+
+
+# F4: sin=True coerces bool->int 1 via pydantic Union before _validate_sin
+# sees it. BeforeValidator now rejects bool at pydantic layer.
+def test_sin_bool_true_rejected():
+    async def _run():
+        try:
+            await mcp.call_tool("keyword_search", {"keyword": "dev", "sin": True})
+        except Exception as e:
+            assert "boolean" in str(e).lower()
+            return
+        raise AssertionError("sin=True should be rejected as bool")
+    asyncio.run(_run())
+
+
+def test_sin_bool_false_rejected():
+    async def _run():
+        try:
+            await mcp.call_tool("keyword_search", {"keyword": "dev", "sin": False})
+        except Exception as e:
+            assert "boolean" in str(e).lower()
+            return
+        raise AssertionError("sin=False should be rejected as bool")
+    asyncio.run(_run())
+
+
+def test_sin_analysis_bool_rejected():
+    async def _run():
+        try:
+            await mcp.call_tool("sin_analysis", {"sin_code": True})
+        except Exception as e:
+            assert "boolean" in str(e).lower()
+            return
+        raise AssertionError("sin_code=True should be rejected")
+    asyncio.run(_run())
+
+
+def test_sin_too_long():
+    asyncio.run(_call_expect_error(
+        "sin_analysis", "exceeds 20", sin_code="5"*200
+    ))
+
+
+# F5: proposed_rate=NaN produced vs_median="equal" and iqr_position="above P75"
+# because NaN comparisons always return False and fall to else branches.
+def test_proposed_rate_nan_rejected():
+    asyncio.run(_call_expect_error(
+        "price_reasonableness_check", "finite",
+        labor_category="Software Developer", proposed_rate=float('nan')
+    ))
+
+
+def test_proposed_rate_inf_rejected():
+    asyncio.run(_call_expect_error(
+        "price_reasonableness_check", "finite",
+        labor_category="Software Developer", proposed_rate=float('inf')
+    ))
+
+
+# F6: price_min/max=NaN/Inf passed pydantic (float type no finite constraint)
+# and only failed at the API with HTTP 406.
+def test_price_min_nan_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "finite", keyword="dev", price_min=float('nan')
+    ))
+
+
+def test_price_max_inf_rejected():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "finite", keyword="dev", price_max=float('inf')
+    ))
+
+
+# F7: pagination past end (page*page_size > total) silently returned empty
+# with no indication whether it was truly no data or we paged past the end.
+def test_paged_past_end_flag():
+    """Paging past the last-data page must set paged_past_end."""
+    import gsa_calc_mcp.server as S
+
+    async def fake(qs):
+        # total=500, caller asks page=100 ps=10 -> offset 990 >> 500.
+        # Within ES 10k window (100*10=1000) but past total.
+        return {
+            "hits": {"total": {"value": 500}, "hits": []},
+            "aggregations": {},
+        }
+
+    orig = S._get
+    S._get = fake
+    try:
+        r = asyncio.run(S.mcp.call_tool(
+            "keyword_search", {"keyword": "test", "page": 100, "page_size": 10}
+        ))
+        payload = r[1] if isinstance(r, tuple) else r
+        assert payload.get("paged_past_end") is True
+        assert "last page with data is page" in payload.get("paged_past_end_reason", "")
+    finally:
+        S._get = orig
+
+
+def test_paged_past_end_not_set_on_normal_page():
+    """A normal page-1 call should NOT set paged_past_end."""
+    import gsa_calc_mcp.server as S
+
+    async def fake(qs):
+        return {
+            "hits": {"total": {"value": 2076}, "hits": [{"_source": {"labor_category": "X"}}]},
+            "aggregations": {},
+        }
+
+    orig = S._get
+    S._get = fake
+    try:
+        r = asyncio.run(S.mcp.call_tool(
+            "keyword_search", {"keyword": "test", "page": 1, "page_size": 100}
+        ))
+        payload = r[1] if isinstance(r, tuple) else r
+        assert "paged_past_end" not in payload
+    finally:
+        S._get = orig
+
+
+# F8: GSA CALC's Elasticsearch has a 10,000-result window. page*page_size>10k
+# previously round-tripped to a cryptic 406.
+def test_es_window_page_times_page_size_over_10k():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "10,000-result", keyword="dev", page=101, page_size=100
+    ))
+
+
+def test_es_window_page_500_ps_21():
+    asyncio.run(_call_expect_error(
+        "keyword_search", "10,000-result", keyword="dev", page=21, page_size=500
+    ))
+
+
+def test_es_window_ok_at_boundary():
+    """page=100, page_size=100 == 10000 offset exactly, should pass."""
+    import gsa_calc_mcp.server as S
+
+    async def fake(qs):
+        return {"hits": {"total": {"value": 50000}, "hits": []}, "aggregations": {}}
+
+    orig = S._get
+    S._get = fake
+    try:
+        r = asyncio.run(S.mcp.call_tool(
+            "keyword_search", {"keyword": "test", "page": 100, "page_size": 100}
+        ))
+        # Should succeed (boundary == 10000, not > 10000)
+        assert r is not None
+    finally:
+        S._get = orig
+
+
+# F9-F12: length caps on free-text fields to pre-empt HTTP 406.
+def test_igce_benchmark_labor_category_too_long():
+    asyncio.run(_call_expect_error(
+        "igce_benchmark", "labor_category exceeds", labor_category="x"*600
+    ))
+
+
+def test_suggest_contains_term_too_long():
+    asyncio.run(_call_expect_error(
+        "suggest_contains", "term exceeds",
+        field="labor_category", term="x"*600
+    ))
+
+
+def test_vendor_rate_card_name_too_long():
+    asyncio.run(_call_expect_error(
+        "vendor_rate_card", "vendor_name exceeds", vendor_name="x"*600
+    ))
+
+
+# USER_AGENT freshness
+def test_user_agent_bumped_022():
+    from gsa_calc_mcp.constants import USER_AGENT
+    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+
+
+# ---------------------------------------------------------------------------
+# Live-gated integration tests (GSA_CALC_LIVE_TESTS=1 to run)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_filtered_browse_one_filter_works():
+    """Even with the at-least-one-filter guard, a single filter must still work."""
+    result = asyncio.run(_call("filtered_browse", education_level="PHD", page_size=1))
+    payload = _payload(result)
+    assert payload.get("_stats", {}).get("total_rates", 0) > 0
+
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_apostrophe_vendor_passes():
+    """Vendor names with apostrophes (O'Connor Davies) must be accepted."""
+    result = asyncio.run(_call("vendor_rate_card", vendor_name="O'C"))
+    payload = _payload(result)
+    # Should either find a vendor or return a clear no-match error;
+    # the key thing is no WAF firewall rejection.
+    assert "firewall" not in str(payload).lower()
+
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_compound_filters_narrow():
+    """Stacking 5+ filters should narrow, not accidentally widen."""
+    result = asyncio.run(_call(
+        "keyword_search",
+        keyword="Software Developer",
+        education_level="MA",
+        experience_min=5, experience_max=15,
+        business_size="S", security_clearance="yes",
+        page_size=1,
+    ))
+    payload = _payload(result)
+    total = payload.get("_stats", {}).get("total_rates", 0)
+    # Stacked filters should yield a small, narrowed set.
+    assert total < 1000, f"expected narrowing, got {total}"
+
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_concurrent_calls():
+    """5 parallel calls should not clobber each other."""
+    async def _run():
+        res = await asyncio.gather(
+            _call("keyword_search", keyword="engineer", page_size=1),
+            _call("keyword_search", keyword="scientist", page_size=1),
+            _call("keyword_search", keyword="analyst", page_size=1),
+            _call("keyword_search", keyword="developer", page_size=1),
+            _call("keyword_search", keyword="manager", page_size=1),
+        )
+        for r in res:
+            payload = _payload(r)
+            assert payload.get("_stats", {}).get("total_rates", 0) > 0
+    asyncio.run(_run())
+
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_paged_past_end_real_api():
+    """page 100 of 'Software Developer' (~2076 records) should flag paged_past_end."""
+    async def _run():
+        # 2076 / 100 ~= 21 pages, so page 100 is way past end.
+        result = await _call(
+            "keyword_search", keyword="Software Developer",
+            page=100, page_size=100,
+        )
+        payload = _payload(result)
+        assert payload.get("paged_past_end") is True
+    asyncio.run(_run())
+
+
+@pytest.mark.skipif(not LIVE, reason="Set GSA_CALC_LIVE_TESTS=1")
+def test_live_unicode_keyword_roundtrip():
+    """Japanese/emoji/accented chars round-trip without 403."""
+    result = asyncio.run(_call("keyword_search", keyword="café", page_size=1))
+    payload = _payload(result)
+    assert "firewall" not in str(payload).lower()
