@@ -4,6 +4,8 @@ MCP server for SAM.gov entity registration, exclusion/debarment, contract opport
 
 Requires a free SAM.gov API key. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
 
+*Tested and hardened through four audit rounds plus a live audit with a real SAM.gov key. 79 regression tests covering 3 P1 live-audit silent-wrong-data bugs, 5 P1 response-shape crashes, and multiple P2 validation gaps fixed. Birthplace of the `extra='forbid'` cross-fix applied to all 8 MCPs in the suite. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes four SAM.gov REST APIs plus the PSC lookup as 15 MCP tools:
