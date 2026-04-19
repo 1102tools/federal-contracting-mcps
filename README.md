@@ -4,6 +4,8 @@ MCP server for the GSA Per Diem Rates API. Federal travel lodging and M&IE rates
 
 Works without configuration using DEMO_KEY. Optional free API key for higher rate limits.
 
+*Tested and hardened through six rounds of integration testing against the live GSA Per Diem API, including a round-6 live audit with a real api.data.gov key. 172 regression tests covering 1 P0 path-traversal bug, 23 P1 silent-wrong-data bugs, and 21 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the GSA Per Diem API as 6 MCP tools:
