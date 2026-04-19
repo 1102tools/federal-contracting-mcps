@@ -4,6 +4,8 @@ MCP server for the Federal Register API. Proposed rules, final rules, notices, e
 
 No authentication required.
 
+*Tested and hardened through four rounds of integration testing against the live Federal Register API. 77 regression tests covering 14 P1 items including the `list_agencies` pydantic crash that hit every call, payload bombs, and silent-wrong-data substring matches, plus 10 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+
 ## What it does
 
 Exposes the Federal Register API as 8 MCP tools:
