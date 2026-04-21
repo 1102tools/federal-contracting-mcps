@@ -46,10 +46,10 @@
   "user_config": {
     "regulations_gov_api_key": {
       "type": "string",
-      "title": "api.data.gov API Key (optional)",
-      "description": "Free key from https://api.data.gov/signup/ for 1,000 req/hr. Leave blank to use DEMO_KEY at severe rate limits. Same key works for gsa-perdiem-mcp.",
+      "title": "api.data.gov API Key",
+      "description": "Free key from https://api.data.gov/signup/. 1,000 req/hr. Same key works for gsa-perdiem-mcp. DEMO_KEY fallback exists but its 30/hr, 50/day limits are too tight for real use.",
       "sensitive": true,
-      "required": false
+      "required": true
     }
   },
   "compatibility": {

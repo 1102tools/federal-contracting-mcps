@@ -47,10 +47,10 @@
   "user_config": {
     "bls_api_key": {
       "type": "string",
-      "title": "BLS API Key (optional)",
-      "description": "Free API key from https://data.bls.gov/registrationEngine/ raises limits to 500 queries/day (v2 API). Leave blank to use v1 at 25 queries/day without a key.",
+      "title": "BLS API Key",
+      "description": "Free API key from https://data.bls.gov/registrationEngine/. Unlocks the v2 API at 500 queries/day. The v1 fallback (25/day, no key) is too limited for real IGCE work.",
       "sensitive": true,
-      "required": false
+      "required": true
     }
   },
   "compatibility": {
