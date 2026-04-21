@@ -2,19 +2,19 @@
   "manifest_version": "0.4",
   "name": "federal-register-mcp",
   "display_name": "Federal Register",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "MCP server for the Federal Register. Proposed rules, final rules, notices, executive orders, FAR cases, and regulatory tracking.",
   "long_description": "Queries the Federal Register API for published proposed rules, final rules, notices, and executive orders since 1994. Includes comment period tracking, FAR case history, and full-text search across agency documents.\n\n8 tools. No authentication required.\n\nHardened across 4 audit rounds with 77 regression tests. Roughly 30 items addressed including the pydantic crash and payload bomb cross-fixes applied across all 8 MCPs in this suite.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",
-    "url": "https://www.linkedin.com/in/jamesjenrette/"
+    "url": "https://github.com/1102tools"
   },
   "homepage": "https://1102tools.com",
   "documentation": "https://github.com/1102tools/federal-contracting-mcps/blob/main/servers/federal-register-mcp/readme.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/1102tools/federal-contracting-mcps"
+    "url": "https://github.com/1102tools/federal-contracting-mcps/tree/main/servers/federal-register-mcp"
   },
   "support": "https://github.com/1102tools/federal-contracting-mcps/issues",
   "license": "MIT",

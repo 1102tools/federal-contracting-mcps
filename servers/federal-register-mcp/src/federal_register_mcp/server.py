@@ -334,7 +334,7 @@ def _build_search_params(
 # Core tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Documents", "readOnlyHint": True, "destructiveHint": False})
 async def search_documents(
     agencies: list[str] | None = None,
     doc_types: list[Literal["PRORULE", "RULE", "NOTICE", "PRESDOCU"]] | None = None,
@@ -428,7 +428,7 @@ async def search_documents(
     return await _get(f"{BASE_URL}/documents.json?{qs}")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Document", "readOnlyHint": True, "destructiveHint": False})
 async def get_document(
     document_number: str,
 ) -> dict[str, Any]:
@@ -443,7 +443,7 @@ async def get_document(
     return await _get(f"{BASE_URL}/documents/{dn}.json")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Documents Batch", "readOnlyHint": True, "destructiveHint": False})
 async def get_documents_batch(
     document_numbers: list[str],
 ) -> dict[str, Any]:
@@ -462,7 +462,7 @@ async def get_documents_batch(
     return await _get(f"{BASE_URL}/documents/{nums}.json")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Facet Counts", "readOnlyHint": True, "destructiveHint": False})
 async def get_facet_counts(
     facet: Literal["type", "agency", "topic"],
     agencies: list[str] | None = None,
@@ -521,7 +521,7 @@ async def get_facet_counts(
     return await _get(url)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Public Inspection", "readOnlyHint": True, "destructiveHint": False})
 async def get_public_inspection(
     agency_filter: str | None = None,
     keyword_filter: str | None = None,
@@ -587,7 +587,7 @@ async def get_public_inspection(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "List Agencies", "readOnlyHint": True, "destructiveHint": False})
 async def list_agencies(
     query: str | None = None,
     include_detail: bool = False,
@@ -645,7 +645,7 @@ async def list_agencies(
 # Workflow tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Open Comment Periods", "readOnlyHint": True, "destructiveHint": False})
 async def open_comment_periods(
     agencies: list[str] | None = None,
     term: str | None = None,
@@ -689,7 +689,7 @@ async def open_comment_periods(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "FAR Case History", "readOnlyHint": True, "destructiveHint": False})
 async def far_case_history(docket_id: str) -> dict[str, Any]:
     """Get all Federal Register documents for a FAR/DFARS case.
 
