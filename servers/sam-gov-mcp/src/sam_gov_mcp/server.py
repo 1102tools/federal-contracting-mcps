@@ -490,7 +490,7 @@ async def _get(
 # Entity Management tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup Entity by UEI", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_entity_by_uei(
     uei: str,
     include_sections: list[
@@ -544,7 +544,7 @@ async def lookup_entity_by_uei(
     return await _get(ENTITY_PATH, params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup Entity by CAGE", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_entity_by_cage(
     cage_code: str,
     include_sections: list[str] | None = None,
@@ -569,7 +569,7 @@ async def lookup_entity_by_cage(
     return await _get(ENTITY_PATH, params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Entities", "readOnlyHint": True, "destructiveHint": False})
 async def search_entities(
     legal_business_name: str | None = None,
     primary_naics: Union[str, int, None] = None,
@@ -665,7 +665,7 @@ async def search_entities(
     return await _get(ENTITY_PATH, params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Entity Reps and Certs", "readOnlyHint": True, "destructiveHint": False})
 async def get_entity_reps_and_certs(
     uei: str,
     summary_only: bool = True,
@@ -757,7 +757,7 @@ async def get_entity_reps_and_certs(
     return data
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Entity Integrity Info", "readOnlyHint": True, "destructiveHint": False})
 async def get_entity_integrity_info(uei: str) -> dict[str, Any]:
     """Fetch FAPIIS proceedings integrity information for an entity by UEI.
 
@@ -779,7 +779,7 @@ async def get_entity_integrity_info(uei: str) -> dict[str, Any]:
 # Exclusion tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Check Exclusion by UEI", "readOnlyHint": True, "destructiveHint": False})
 async def check_exclusion_by_uei(uei: str) -> dict[str, Any]:
     """Check if an entity has any exclusion/debarment records by UEI.
 
@@ -798,7 +798,7 @@ async def check_exclusion_by_uei(uei: str) -> dict[str, Any]:
     return await _get(EXCLUSIONS_PATH, params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Exclusions", "readOnlyHint": True, "destructiveHint": False})
 async def search_exclusions(
     entity_name: str | None = None,
     cage_code: str | None = None,
@@ -883,7 +883,7 @@ async def search_exclusions(
 # Opportunity tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Opportunities", "readOnlyHint": True, "destructiveHint": False})
 async def search_opportunities(
     posted_from: str,
     posted_to: str,
@@ -1032,7 +1032,7 @@ async def search_opportunities(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Opportunity Description", "readOnlyHint": True, "destructiveHint": False})
 async def get_opportunity_description(notice_id: str) -> dict[str, Any]:
     """Fetch the full description text for a contract opportunity by notice ID.
 
@@ -1050,7 +1050,7 @@ async def get_opportunity_description(notice_id: str) -> dict[str, Any]:
 # PSC lookup tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup PSC Code", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_psc_code(
     code: str,
     active_only: Literal["Y", "N", "ALL"] = "Y",
@@ -1077,7 +1077,7 @@ async def lookup_psc_code(
     return await _get(PSC_PATH, params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search PSC Free Text", "readOnlyHint": True, "destructiveHint": False})
 async def search_psc_free_text(
     query: str,
     active_only: Literal["Y", "N", "ALL"] = "Y",
@@ -1140,7 +1140,7 @@ def _normalize_awards_response(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Contract Awards", "readOnlyHint": True, "destructiveHint": False})
 async def search_contract_awards(
     awardee_name: str | None = None,
     awardee_uei: str | None = None,
@@ -1289,7 +1289,7 @@ async def search_contract_awards(
     return _normalize_awards_response(result)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup Award by PIID", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_award_by_piid(
     piid: str,
     include_sections: str | None = None,
@@ -1331,7 +1331,7 @@ async def lookup_award_by_piid(
     return _normalize_awards_response(result)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Deleted Awards", "readOnlyHint": True, "destructiveHint": False})
 async def search_deleted_awards(
     piid: str | None = None,
     awardee_name: str | None = None,
@@ -1383,7 +1383,7 @@ async def search_deleted_awards(
 # Composite workflow tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Vendor Responsibility Check", "readOnlyHint": True, "destructiveHint": False})
 async def vendor_responsibility_check(uei: str) -> dict[str, Any]:
     """Composite pre-award vendor responsibility check per FAR 9.104-1.
 
