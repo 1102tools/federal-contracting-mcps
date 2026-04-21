@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "bls-oews-mcp",
   "display_name": "BLS OEWS",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "MCP server for BLS Occupational Employment and Wage Statistics (OEWS). Market wage data for IGCE development and price analysis.",
   "long_description": "Queries BLS OEWS data covering approximately 830 occupations across 530+ metro areas. Returns employment counts, mean/median wages, and full percentile distributions (10th/25th/50th/75th/90th) at national, state, and metro levels.\n\n7 tools. Optional BLS API key raises the ceiling to 500 queries/day via the v2 API. Without a key, the server falls back to v1 at 25 queries/day.\n\nHardened across 5 audit rounds with 60 regression tests. 22 findings fixed including 12 response-shape crash paths surfaced in mock fuzzing.",
   "author": {

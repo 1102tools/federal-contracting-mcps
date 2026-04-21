@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "gsa-calc-mcp",
   "display_name": "GSA CALC+",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "MCP server for GSA CALC+ Labor Ceiling Rates. Rate benchmarking for IGCEs and price analysis.",
   "long_description": "Queries the GSA CALC+ API for awarded not-to-exceed hourly rates from GSA MAS contracts (230K+ records). Search by labor category, education, experience, SIN, vendor, or business size. Returns rates with statistical aggregations (mean, median, percentiles, std dev).\n\n8 tools. No authentication required. CALC+ rates are ceiling rates (maximum a contractor can charge), not prices paid.\n\nHardened across 4 retroactive rounds plus a WAF-calibration pass with 117 regression tests. 86 findings including filtered_browse() returning 265,000 unfiltered records, pydantic bool-to-int silent coercion on sin parameters, and Elasticsearch 10k-result window overflow.",
   "author": {

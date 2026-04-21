@@ -1,0 +1,53 @@
+name: Publish to PyPI
+
+# Publishes every server package to PyPI on tag push via OIDC Trusted Publisher.
+# Each server must have a Trusted Publisher configured at
+# https://pypi.org/manage/project/<pkg>/settings/publishing/ pointing at
+# this repo and this workflow filename.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server:
+          - { dir: "bls-oews-mcp",        pkg: "bls-oews-mcp" }
+          - { dir: "ecfr-mcp",            pkg: "ecfr-mcp" }
+          - { dir: "federal-register-mcp", pkg: "federal-register-mcp" }
+          - { dir: "gsa-calc-mcp",        pkg: "gsa-calc-mcp" }
+          - { dir: "gsa-perdiem-mcp",     pkg: "gsa-perdiem-mcp" }
+          - { dir: "regulations-gov-mcp", pkg: "regulationsgov-mcp" }
+          - { dir: "sam-gov-mcp",         pkg: "sam-gov-mcp" }
+          - { dir: "usaspending-gov-mcp", pkg: "usaspending-gov-mcp" }
+
+    permissions:
+      id-token: write  # required for Trusted Publisher OIDC
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tooling
+        run: pip install --upgrade build
+
+      - name: Build sdist + wheel
+        working-directory: servers/${{ matrix.server.dir }}
+        run: python -m build
+
+      - name: Publish to PyPI (${{ matrix.server.pkg }})
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: servers/${{ matrix.server.dir }}/dist/
+          skip-existing: true
