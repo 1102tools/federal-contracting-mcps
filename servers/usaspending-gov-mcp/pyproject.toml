@@ -31,8 +31,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/usaspending-gov-mcp"
-Issues = "https://github.com/1102tools/usaspending-gov-mcp/issues"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 usaspending-mcp = "usaspending_gov_mcp.server:main"

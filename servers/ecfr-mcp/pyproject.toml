@@ -37,8 +37,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/ecfr-mcp"
-Issues = "https://github.com/1102tools/ecfr-mcp/issues"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 ecfr-mcp = "ecfr_mcp.server:main"

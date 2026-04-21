@@ -165,4 +165,4 @@ Testing in 0.2.2 spanned five rounds covering SOC format validation, silent-supp
 
 Test count: 60 regression tests. P0 usability-breaking bugs found and fixed: 1. P1 silent-wrong-data bugs found and fixed: 10. P1 response-shape crash paths found and fixed: 12. P2 validation gaps closed: 7. P3 cleanup items closed: 4. Total findings: 22. Current version: 0.2.2. PyPI: `bls-oews-mcp`.
 
-Source: github.com/1102tools/bls-oews-mcp. License: MIT.
+Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/bls-oews-mcp. License: MIT.

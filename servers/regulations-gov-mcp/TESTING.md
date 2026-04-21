@@ -146,4 +146,4 @@ Testing spanned three rounds: a broad live sweep across all 8 tools (most of the
 
 Test count: 51 regression tests. P0 catastrophic bugs found and fixed: 1. P1 silent-wrong-data bugs found and fixed: 10. P2 validation gaps closed: 7. P3 cleanup items closed: 4. Total findings: 22. Current version: 0.2.0. PyPI: `regulationsgov-mcp`.
 
-Source: github.com/1102tools/regulationsgov-mcp. License: MIT.
+Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/regulations-gov-mcp. License: MIT.

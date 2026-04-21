@@ -69,8 +69,8 @@ pip install sam-gov-mcp
 ### From source
 
 ```bash
-git clone https://github.com/1102tools/sam-gov-mcp.git
-cd sam-gov-mcp
+git clone https://github.com/1102tools/federal-contracting-mcps.git
+cd federal-contracting-mcps/servers/sam-gov-mcp
 pip install -e .
 ```
 
@@ -126,9 +126,9 @@ Once configured:
 - **Contract Awards pagination.** Uses `limit`/`offset` (NOT `page`/`size` like Entity Management). Max limit is 100. Dates must be MM/dd/yyyy format with bracket ranges `[MM/dd/yyyy,MM/dd/yyyy]`.
 - **Composite workflow.** `vendor_responsibility_check` collapses a typical FAR 9.104-1 check (entity registration + exclusion lookup) into one tool call, returning a structured flags list for downstream reasoning.
 
-## Companion skill
+## Part of
 
-This MCP mirrors the `sam-gov-api` skill from [1102tools.com](https://1102tools.com). The skill is markdown-based and runs in any Claude surface; the MCP wraps the same API surface as deterministic tool calls for agent workflows, automation, and Claude.ai web client use.
+[federal-contracting-mcps](https://github.com/1102tools/federal-contracting-mcps) — monorepo of 8 MCP servers for federal contracting data. Companion to [federal-contracting-skills](https://github.com/1102tools/federal-contracting-skills).
 
 ## License
 

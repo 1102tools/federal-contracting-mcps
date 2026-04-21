@@ -35,8 +35,8 @@ uvx gsa-calc-mcp
 Or from source:
 
 ```bash
-git clone https://github.com/1102tools/gsa-calc-mcp.git
-cd gsa-calc-mcp
+git clone https://github.com/1102tools/federal-contracting-mcps.git
+cd federal-contracting-mcps/servers/gsa-calc-mcp
 pip install -e .
 ```
 

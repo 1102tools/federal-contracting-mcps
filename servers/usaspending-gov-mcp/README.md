@@ -54,8 +54,8 @@ uvx usaspending-gov-mcp
 ### From source
 
 ```bash
-git clone https://github.com/1102tools/usaspending-gov-mcp.git
-cd usaspending-gov-mcp
+git clone https://github.com/1102tools/federal-contracting-mcps.git
+cd federal-contracting-mcps/servers/usaspending-gov-mcp
 pip install -e .
 ```
 

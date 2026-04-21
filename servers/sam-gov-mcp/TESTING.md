@@ -147,4 +147,4 @@ Testing spanned four audit rounds in 0.3.0 (WAF, response-shape, validation, int
 
 Test count: 79 regression tests. Total items addressed across releases: 46. P1 silent-wrong-data bugs surfaced only in live audit: 3. Response-shape crashes found and fixed: 5. Current version: 0.3.1. PyPI: `sam-gov-mcp`.
 
-Source: github.com/1102tools/sam-gov-mcp. License: MIT.
+Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/sam-gov-mcp. License: MIT.

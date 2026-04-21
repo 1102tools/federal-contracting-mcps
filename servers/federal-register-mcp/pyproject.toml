@@ -27,7 +27,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/federal-register-mcp"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 federal-register-mcp = "federal_register_mcp.server:main"

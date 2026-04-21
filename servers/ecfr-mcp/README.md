@@ -48,8 +48,8 @@ pip install ecfr-mcp
 ### From source
 
 ```bash
-git clone https://github.com/1102tools/ecfr-mcp.git
-cd ecfr-mcp
+git clone https://github.com/1102tools/federal-contracting-mcps.git
+cd federal-contracting-mcps/servers/ecfr-mcp
 pip install -e .
 ```
 

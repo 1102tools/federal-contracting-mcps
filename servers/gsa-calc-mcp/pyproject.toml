@@ -27,7 +27,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/gsa-calc-mcp"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 gsa-calc-mcp = "gsa_calc_mcp.server:main"

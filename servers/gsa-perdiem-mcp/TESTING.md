@@ -168,4 +168,4 @@ Testing spanned six rounds including response-shape fuzzing, validation gap audi
 
 Test count: 172 regression tests. P0 catastrophic bugs found and fixed: 1. P1 bugs found and fixed: 23. P2 validation gaps closed: 21. P3 cleanup items closed: 10. Total findings: 55. Current version: 0.2.1. PyPI: `gsa-perdiem-mcp`.
 
-Source: github.com/1102tools/gsa-perdiem-mcp. License: MIT.
+Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/gsa-perdiem-mcp. License: MIT.

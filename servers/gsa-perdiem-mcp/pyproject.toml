@@ -33,7 +33,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/gsa-perdiem-mcp"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 gsa-perdiem-mcp = "gsa_perdiem_mcp.server:main"

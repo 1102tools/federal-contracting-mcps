@@ -27,7 +27,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://1102tools.com"
-Repository = "https://github.com/1102tools/bls-oews-mcp"
+Repository = "https://github.com/1102tools/federal-contracting-mcps"
+Issues = "https://github.com/1102tools/federal-contracting-mcps/issues"
 
 [project.scripts]
 bls-oews-mcp = "bls_oews_mcp.server:main"

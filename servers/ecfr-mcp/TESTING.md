@@ -209,4 +209,4 @@ Testing spanned five rounds from integration stress through response-shape fuzzi
 
 Test count: 101 regression tests. P0 catastrophic bugs found and fixed: 2. P1 bugs found and fixed: 26. P2 validation gaps closed: 32. P3 cleanup items closed: 12. Total findings: 72. Current version: 0.2.1. PyPI: `ecfr-mcp`.
 
-Source: github.com/1102tools/ecfr-mcp. License: MIT.
+Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/ecfr-mcp. License: MIT.
