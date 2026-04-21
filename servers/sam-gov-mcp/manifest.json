@@ -2,13 +2,13 @@
   "manifest_version": "0.4",
   "name": "sam-gov-mcp",
   "display_name": "SAM.gov",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "MCP server for SAM.gov entity registration, exclusions, opportunities, and contract awards (FPDS replacement)",
   "long_description": "Queries SAM.gov REST APIs for federal entity and contract data, including:\n\n- **Entity Management v3** (UEI/CAGE lookups, registration status, business types, NAICS/PSC, reps and certs)\n- **Exclusions v4** (debarment, suspension, responsibility determinations)\n- **Opportunities v2** (solicitations, sources sought, award notices)\n- **Contract Awards v1** (FPDS replacement; PIID lookups, mod histories, vendor award searches)\n- **PSC code lookups**\n\n15 read-only tools. Built for GS-1102 contracting officers, contract specialists, and anyone performing pre-award or responsibility determinations.\n\nIndependently hardened across 4 audit rounds with 79 regression tests. 46 bugs fixed during hardening. Origin repo for the `extra='forbid'` pydantic pattern that protects every 1102tools MCP from typo'd parameter name silent-wrong-data bugs.\n\nFull testing record in the source repository.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",
-    "url": "https://1102tools.com"
+    "url": "https://www.linkedin.com/in/jamesjenrette/"
   },
   "homepage": "https://1102tools.com",
   "documentation": "https://github.com/1102tools/federal-contracting-mcps/blob/main/servers/sam-gov-mcp/readme.md",

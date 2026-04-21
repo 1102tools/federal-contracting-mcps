@@ -2,13 +2,13 @@
   "manifest_version": "0.4",
   "name": "regulationsgov-mcp",
   "display_name": "Regulations.gov",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MCP server for Regulations.gov. Federal rulemaking dockets, documents, comments, and comment period tracking.",
   "long_description": "Queries the Regulations.gov API for federal rulemaking dockets, proposed rules, final rules, public comments, and comment period tracking. Useful for FAR case monitoring and regulatory intake during proposed rule comment windows.\n\n8 tools. Optional api.data.gov key for 1,000 req/hr. Without a key the server falls back to DEMO_KEY at severe rate limits (30/hr, 50/day).\n\nHardened across 3 audit rounds with 51 regression tests. 22 findings fixed including 1 P0 catastrophic bug and 10 P1 silent-wrong-data bugs surfaced during the broad live sweep.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",
-    "url": "https://1102tools.com"
+    "url": "https://www.linkedin.com/in/jamesjenrette/"
   },
   "homepage": "https://1102tools.com",
   "documentation": "https://github.com/1102tools/federal-contracting-mcps/blob/main/servers/regulations-gov-mcp/readme.md",
