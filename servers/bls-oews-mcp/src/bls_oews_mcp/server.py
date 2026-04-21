@@ -495,7 +495,7 @@ def _series_id_from(series_item: Any, fallback: str = "") -> str:
 # Core tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Wage Data", "readOnlyHint": True, "destructiveHint": False})
 async def get_wage_data(
     occ_code: Union[str, int],
     scope: Literal["national", "state", "metro"] = "national",
@@ -634,7 +634,7 @@ async def get_wage_data(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Compare Metros", "readOnlyHint": True, "destructiveHint": False})
 async def compare_metros(
     occ_code: Union[str, int],
     metro_codes: list[Union[str, int]],
@@ -725,7 +725,7 @@ async def compare_metros(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Compare Occupations", "readOnlyHint": True, "destructiveHint": False})
 async def compare_occupations(
     occ_codes: list[Union[str, int]],
     scope: Literal["national", "state", "metro"] = "national",
@@ -805,7 +805,7 @@ async def compare_occupations(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "IGCE Wage Benchmark", "readOnlyHint": True, "destructiveHint": False})
 async def igce_wage_benchmark(
     occ_code: Union[str, int],
     scope: Literal["national", "state", "metro"] = "national",
@@ -905,7 +905,7 @@ async def igce_wage_benchmark(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Detect Latest Year", "readOnlyHint": True, "destructiveHint": False})
 async def detect_latest_year() -> dict[str, Any]:
     """Probe the BLS API to check if a newer OEWS data year is available.
 
@@ -954,7 +954,7 @@ async def detect_latest_year() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "List Common SOC Codes", "readOnlyHint": True, "destructiveHint": False})
 async def list_common_soc_codes() -> dict[str, Any]:
     """List common SOC code mappings for federal IT and professional services.
 
@@ -966,7 +966,7 @@ async def list_common_soc_codes() -> dict[str, Any]:
     return {"soc_codes": COMMON_SOC_CODES}
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "List Common Metros", "readOnlyHint": True, "destructiveHint": False})
 async def list_common_metros() -> dict[str, Any]:
     """List common metro area MSA codes for wage lookups.
 
