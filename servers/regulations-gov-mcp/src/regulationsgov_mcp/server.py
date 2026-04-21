@@ -448,7 +448,7 @@ def _flag_no_data(
 # Core tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Documents", "readOnlyHint": True, "destructiveHint": False})
 async def search_documents(
     search_term: str | None = None,
     agency_id: str | None = None,
@@ -534,7 +534,7 @@ async def search_documents(
     return _flag_no_data(result, context=ctx, page_size=page_size, page_number=page_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Document Detail", "readOnlyHint": True, "destructiveHint": False})
 async def get_document_detail(
     document_id: str,
     include_attachments: bool = False,
@@ -555,7 +555,7 @@ async def get_document_detail(
     return await _get(f"documents/{document_id}", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Comments", "readOnlyHint": True, "destructiveHint": False})
 async def search_comments(
     search_term: str | None = None,
     agency_id: str | None = None,
@@ -619,7 +619,7 @@ async def search_comments(
     return _flag_no_data(result, context=ctx, page_size=page_size, page_number=page_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Comment Detail", "readOnlyHint": True, "destructiveHint": False})
 async def get_comment_detail(
     comment_id: str,
     include_attachments: bool = False,
@@ -639,7 +639,7 @@ async def get_comment_detail(
     return await _get(f"comments/{comment_id}", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Dockets", "readOnlyHint": True, "destructiveHint": False})
 async def search_dockets(
     search_term: str | None = None,
     agency_id: str | None = None,
@@ -701,7 +701,7 @@ async def search_dockets(
     return _flag_no_data(result, context=ctx, page_size=page_size, page_number=page_number)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Docket Detail", "readOnlyHint": True, "destructiveHint": False})
 async def get_docket_detail(docket_id: str) -> dict[str, Any]:
     """Get full details for a single docket.
 
@@ -718,7 +718,7 @@ async def get_docket_detail(docket_id: str) -> dict[str, Any]:
 # Workflow tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Open Comment Periods", "readOnlyHint": True, "destructiveHint": False})
 async def open_comment_periods(
     agency_ids: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -795,7 +795,7 @@ async def open_comment_periods(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "FAR Case History", "readOnlyHint": True, "destructiveHint": False})
 async def far_case_history(docket_id: str) -> dict[str, Any]:
     """Get the full lifecycle of a FAR/DFARS rulemaking case.
 
