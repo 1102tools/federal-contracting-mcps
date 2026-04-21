@@ -661,7 +661,7 @@ def _extract_stats(data: Any) -> dict[str, Any]:
 # Core search tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Keyword Search", "readOnlyHint": True, "destructiveHint": False})
 async def keyword_search(
     keyword: str,
     education_level: str | None = None,
@@ -747,7 +747,7 @@ async def keyword_search(
     return _attach_pagination_flags(result, page=page, page_size=page_size, total=stats.get("total_rates"))
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Exact Search", "readOnlyHint": True, "destructiveHint": False})
 async def exact_search(
     field: Literal["labor_category", "vendor_name", "idv_piid"],
     value: str,
@@ -800,7 +800,7 @@ async def exact_search(
     return _attach_pagination_flags(result, page=page, page_size=page_size, total=stats.get("total_rates"))
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Suggest Contains", "readOnlyHint": True, "destructiveHint": False})
 async def suggest_contains(
     field: Literal["labor_category", "vendor_name", "idv_piid"],
     term: str,
@@ -854,7 +854,7 @@ async def suggest_contains(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Filtered Browse", "readOnlyHint": True, "destructiveHint": False})
 async def filtered_browse(
     education_level: str | None = None,
     experience_min: int | None = None,
@@ -916,7 +916,7 @@ async def filtered_browse(
 # Workflow tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "IGCE Benchmark", "readOnlyHint": True, "destructiveHint": False})
 async def igce_benchmark(
     labor_category: str,
     education_level: str | None = None,
@@ -966,7 +966,7 @@ async def igce_benchmark(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Price Reasonableness Check", "readOnlyHint": True, "destructiveHint": False})
 async def price_reasonableness_check(
     labor_category: str,
     proposed_rate: float,
@@ -1049,7 +1049,7 @@ async def price_reasonableness_check(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Vendor Rate Card", "readOnlyHint": True, "destructiveHint": False})
 async def vendor_rate_card(
     vendor_name: str,
     page_size: int = 500,
@@ -1145,7 +1145,7 @@ async def vendor_rate_card(
     return response
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "SIN Analysis", "readOnlyHint": True, "destructiveHint": False})
 async def sin_analysis(
     sin_code: Annotated[Union[str, int], BeforeValidator(_reject_bool_pre)],
     page_size: int = 100,
