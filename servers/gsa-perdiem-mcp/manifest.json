@@ -2,19 +2,19 @@
   "manifest_version": "0.4",
   "name": "gsa-perdiem-mcp",
   "display_name": "GSA Per Diem",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "MCP server for GSA Per Diem Rates. Federal travel lodging and M&IE rates for IGCEs and travel cost estimation.",
   "long_description": "Queries the GSA Per Diem Rates API for federal travel lodging and M&IE rates across all CONUS locations. Look up by city, state, or ZIP. Returns monthly lodging rates with seasonal variations, M&IE breakdowns, and first/last day travel rates at 75%.\n\n6 tools. Optional api.data.gov key for 1,000 req/hr. Without a key the server falls back to DEMO_KEY at severe rate limits (30/hr, 50/day).\n\nHardened across 6 audit rounds with 172 regression tests including a real-key live audit that surfaced 3 P1 silent-wrong-data bugs mocks could not catch. 55 findings fixed. Signature bug: city=\"Martha\u2019s Vineyard\" (typographic apostrophe) silently matched Andover, MA.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",
-    "url": "https://www.linkedin.com/in/jamesjenrette/"
+    "url": "https://github.com/1102tools"
   },
   "homepage": "https://1102tools.com",
   "documentation": "https://github.com/1102tools/federal-contracting-mcps/blob/main/servers/gsa-perdiem-mcp/readme.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/1102tools/federal-contracting-mcps"
+    "url": "https://github.com/1102tools/federal-contracting-mcps/tree/main/servers/gsa-perdiem-mcp"
   },
   "support": "https://github.com/1102tools/federal-contracting-mcps/issues",
   "license": "MIT",

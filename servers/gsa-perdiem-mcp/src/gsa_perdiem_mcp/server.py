@@ -464,7 +464,7 @@ def _normalize_city_for_url(city: str) -> str:
 # Core tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup City Per Diem", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_city_perdiem(
     city: str,
     state: str,
@@ -552,7 +552,7 @@ def _format_lodging_range(rate: dict[str, Any]) -> str:
     return f"${lo}/night"
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup ZIP Per Diem", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_zip_perdiem(
     zip_code: str,
     fiscal_year: int | None = None,
@@ -591,7 +591,7 @@ async def lookup_zip_perdiem(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup State Rates", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_state_rates(
     state: str,
     fiscal_year: int | None = None,
@@ -635,7 +635,7 @@ async def lookup_state_rates(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get M&IE Breakdown", "readOnlyHint": True, "destructiveHint": False})
 async def get_mie_breakdown(fiscal_year: int | None = None) -> dict[str, Any]:
     """Get the M&IE (meals and incidental expenses) tier breakdown table.
 
@@ -683,7 +683,7 @@ async def get_mie_breakdown(fiscal_year: int | None = None) -> dict[str, Any]:
 # Workflow tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Estimate Travel Cost", "readOnlyHint": True, "destructiveHint": False})
 async def estimate_travel_cost(
     city: str,
     state: str,
@@ -764,7 +764,7 @@ async def estimate_travel_cost(
 _MAX_COMPARE_LOCATIONS = 25
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Compare Locations", "readOnlyHint": True, "destructiveHint": False})
 async def compare_locations(
     locations: list[dict[str, str]],
     fiscal_year: int | None = None,
