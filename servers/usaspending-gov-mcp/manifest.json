@@ -1,0 +1,48 @@
+{
+  "manifest_version": "0.4",
+  "name": "usaspending-gov-mcp",
+  "display_name": "USASpending.gov",
+  "version": "0.2.3",
+  "description": "MCP server for USASpending.gov federal contract and award data.",
+  "long_description": "Queries the USASpending.gov API for federal contract and award data across all agencies. PIID lookups, vendor award histories, transaction details, agency spending breakdowns, NAICS and PSC analysis, IDV child lookups.\n\n17 tools. No authentication required.\n\nHardened across 4 audit rounds with 62 regression tests. 10 P1 silent-wrong-data bugs fixed (including search_awards() with no filters silently returning 25 unfiltered recent contracts) and 28+ integration issues surfaced when tests switched from raw coroutines to real MCP client pipeline invocation.",
+  "author": {
+    "name": "James Jenrette",
+    "email": "hello@1102tools.com",
+    "url": "https://1102tools.com"
+  },
+  "homepage": "https://1102tools.com",
+  "documentation": "https://github.com/1102tools/federal-contracting-mcps/blob/main/servers/usaspending-gov-mcp/readme.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1102tools/federal-contracting-mcps"
+  },
+  "support": "https://github.com/1102tools/federal-contracting-mcps/issues",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "usaspending",
+    "federal-contracts",
+    "procurement",
+    "fpds",
+    "gs-1102"
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "src/usaspending_gov_mcp/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "usaspending-mcp"
+      ]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}
