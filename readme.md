@@ -4,9 +4,9 @@ Eight free and open source MCP servers for federal contracting data and policy t
 
 No Terminal. No `uv` install. No JSON config editing. Double-click a `.mcpb` file, Claude Desktop prompts for the API key if one is needed, and the tools register automatically.
 
-## What's in here
+## The eight MCPs
 
-Each server lives in `servers/<name>/`, self-contained with manifest, source, tests, and README.
+All source lives under `servers/<name>/`. Each server is self-contained: manifest, code, tests, per-server README.
 
 **Procurement data**
 - [sam-gov-mcp](servers/sam-gov-mcp) — SAM.gov entity registration, exclusions, opportunities, contract awards (FPDS replacement)
@@ -26,9 +26,9 @@ Combined: 82 deterministic tool calls, 719 regression tests, 8 audit programs, r
 
 1. Install [Claude Desktop](https://claude.ai/download).
 2. Register the free API keys you need: [BLS](https://data.bls.gov/registrationEngine/), [api.data.gov](https://api.data.gov/signup/) (covers Per Diem and Regulations.gov), [SAM.gov](https://sam.gov/). USASpending, GSA CALC+, eCFR, and Federal Register need no key.
-3. Download each `.mcpb` file from the [Releases page](https://github.com/1102tools/federal-contracting-mcps/releases) (coming soon), double-click, and follow the prompt.
+3. Download each `.mcpb` file from [Releases](https://github.com/1102tools/federal-contracting-mcps/releases), double-click, and follow the prompt.
 
-Power users: each server subdirectory has its own README with `uvx` and `pip` instructions for manual install in any MCP client.
+Power users: every server subdirectory has its own README with `uvx` and `pip` instructions for manual install in any MCP client (Claude Desktop, Claude Code, Cursor, Cline, Zed, Continue).
 
 ## Repo layout
 
@@ -43,42 +43,25 @@ federal-contracting-mcps/
 │   ├── regulations-gov-mcp/
 │   ├── sam-gov-mcp/
 │   └── usaspending-gov-mcp/
-├── LICENSE
-└── README.md
+├── license
+└── readme.md
 ```
 
 Each server directory ships its own `manifest.json` (MCPB), `pyproject.toml`, source, regression tests, and testing record.
 
 ## Companion repo
 
-[federal-contracting-skills](https://github.com/1102tools/federal-contracting-skills) — Claude Skills that orchestrate these MCPs into complete acquisition deliverables:
+[federal-contracting-skills](https://github.com/1102tools/federal-contracting-skills) — Claude Skills that orchestrate these MCPs into complete acquisition deliverables: SOW/PWS Builder, three IGCE Builders (FFP, LH/T&M, Cost-Reimbursement), OT Project Description Builder, OT Cost Analysis.
 
-- SOW / PWS Builder (FAR 37.102(d) compliant)
-- IGCE Builder: FFP (wrap rate buildup)
-- IGCE Builder: LH/T&M (burden multiplier)
-- IGCE Builder: Cost-Reimbursement (CPFF / CPAF / CPIF)
-- OT Project Description Builder (10 USC 4021/4022, TRL phases)
-- OT Cost Analysis (milestone-based should-cost)
-
-MCPs handle data. Skills handle deliverables. Install both.
+MCPs handle data. Skills handle deliverables.
 
 ## Why MCPs (and not skills for the API calls)
 
-- **Deterministic tool calls.** MCP servers execute tested Python. Claude does not generate API-call code on the fly. Same input, same output.
-- **One-click install for Claude Desktop.** `.mcpb` bundles prompt for API keys at install time and register tools automatically. Contracting officers install them the same way they install any app.
+- **Deterministic.** MCP servers execute tested Python. Claude does not generate API-call code on the fly. Same input, same output.
+- **One-click install.** `.mcpb` bundles prompt for API keys at install time and register tools automatically. Contracting officers install them the same way they install any app.
 - **Low context cost.** Tool schemas are ~100 tokens each. The deprecated API-data skills cost 500-1000 lines of context per run.
-- **Production-hardened.** Each MCP went through 3-6 audit rounds with live testing against the production API.
+- **Production-hardened.** Each MCP went through 3-6 audit rounds with live testing against its production API.
 - **Cross-client.** MCP is an open standard. Same servers run in Claude Desktop, Claude Code, Cursor, Cline, Zed, Continue.
-
-## Why MCPB (and not just `uv` config)
-
-MCPB is Anthropic's one-click install format for Claude Desktop. A `.mcpb` file bundles the runtime, dependencies, manifest, and credential prompts. Users without Python, `uv`, or Terminal experience install by double-clicking. That is the path contracting officers actually take.
-
-The traditional `uvx` + JSON config path still works for developers and non-Claude clients. See each server's README for manual install instructions.
-
-## Status
-
-All eight MCPs live under `servers/`. `.mcpb` bundles and Releases coming soon.
 
 ## Website
 
