@@ -1,0 +1,67 @@
+name: Build MCPB bundles
+
+# Packs every server with a manifest.json as a .mcpb bundle and uploads
+# them to a GitHub Release on tag push. Manual runs (workflow_dispatch)
+# build bundles and store them as 7-day artifacts for pre-release testing.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mcpb CLI
+        run: npm install -g @anthropic-ai/mcpb@2.1.2
+
+      - name: Validate and pack all bundles
+        run: |
+          set -e
+          shopt -s nullglob
+          mkdir -p dist
+          built=0
+          for manifest in servers/*/manifest.json; do
+            dir=$(dirname "${manifest}")
+            name=$(basename "${dir}")
+            echo "=== ${name} ==="
+            mcpb validate "${manifest}"
+            (cd "${dir}" && mcpb pack .)
+            mv "${dir}"/*.mcpb dist/
+            built=$((built + 1))
+          done
+          echo "Built ${built} bundle(s)"
+          ls -la dist/
+          if [ "${built}" -eq 0 ]; then
+            echo "::error::No manifest.json found under servers/*/"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.mcpb
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Upload artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-bundles
+          path: dist/*.mcpb
+          retention-days: 7
