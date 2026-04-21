@@ -432,7 +432,7 @@ def _resolve_award_type(
 # Search tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Search Awards", "readOnlyHint": True, "destructiveHint": False})
 async def search_awards(
     award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other"] = "contracts",
     keywords: list[str] | None = None,
@@ -577,7 +577,7 @@ async def search_awards(
     return await _post("/api/v2/search/spending_by_award/", payload)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Award Count", "readOnlyHint": True, "destructiveHint": False})
 async def get_award_count(
     award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other"] = "contracts",
     keywords: list[str] | None = None,
@@ -642,7 +642,7 @@ async def get_award_count(
     return await _post("/api/v2/search/spending_by_award_count/", {"filters": filters})
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Spending Over Time", "readOnlyHint": True, "destructiveHint": False})
 async def spending_over_time(
     group: Literal["fiscal_year", "quarter", "month"] = "fiscal_year",
     keywords: list[str] | None = None,
@@ -695,7 +695,7 @@ async def spending_over_time(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Spending by Category", "readOnlyHint": True, "destructiveHint": False})
 async def spending_by_category(
     category: Literal[
         "awarding_agency", "awarding_subagency", "funding_agency", "funding_subagency",
@@ -755,7 +755,7 @@ async def spending_by_category(
 # Detail tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Award Detail", "readOnlyHint": True, "destructiveHint": False})
 async def get_award_detail(generated_award_id: str) -> dict[str, Any]:
     """Fetch full details for a single award by its generated_internal_id.
 
@@ -777,7 +777,7 @@ async def get_award_detail(generated_award_id: str) -> dict[str, Any]:
     return await _get(f"/api/v2/awards/{generated_award_id.strip()}/")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Transactions", "readOnlyHint": True, "destructiveHint": False})
 async def get_transactions(
     generated_award_id: str,
     limit: int = 100,
@@ -813,7 +813,7 @@ async def get_transactions(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Award Funding", "readOnlyHint": True, "destructiveHint": False})
 async def get_award_funding(
     generated_award_id: str,
     limit: int = 50,
@@ -848,7 +848,7 @@ async def get_award_funding(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get IDV Children", "readOnlyHint": True, "destructiveHint": False})
 async def get_idv_children(
     generated_idv_id: str,
     child_type: Literal["child_awards", "child_idvs", "grandchild_awards"] = "child_awards",
@@ -890,7 +890,7 @@ async def get_idv_children(
 # Workflow / convenience tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Lookup PIID", "readOnlyHint": True, "destructiveHint": False})
 async def lookup_piid(piid: str, limit: int = 5) -> dict[str, Any]:
     """Look up awards by PIID or PIID prefix with automatic award-type detection.
 
@@ -976,7 +976,7 @@ async def lookup_piid(piid: str, limit: int = 5) -> dict[str, Any]:
 # Autocomplete tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Autocomplete PSC", "readOnlyHint": True, "destructiveHint": False})
 async def autocomplete_psc(search_text: str, limit: int = 10) -> dict[str, Any]:
     """Autocomplete lookup for Product/Service Codes (PSC).
 
@@ -1007,7 +1007,7 @@ async def autocomplete_psc(search_text: str, limit: int = 10) -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Autocomplete NAICS", "readOnlyHint": True, "destructiveHint": False})
 async def autocomplete_naics(
     search_text: str,
     limit: int = 10,
@@ -1060,7 +1060,7 @@ async def autocomplete_naics(
 # Reference tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "List Toptier Agencies", "readOnlyHint": True, "destructiveHint": False})
 async def list_toptier_agencies() -> dict[str, Any]:
     """List all top-tier federal agencies tracked by USASpending.
 
@@ -1100,7 +1100,7 @@ def _validate_fiscal_year(fiscal_year: int) -> int:
     return fiscal_year
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Agency Overview", "readOnlyHint": True, "destructiveHint": False})
 async def get_agency_overview(
     toptier_code: str,
     fiscal_year: int | None = None,
@@ -1118,7 +1118,7 @@ async def get_agency_overview(
     return await _get(f"/api/v2/agency/{code}/", params=params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get Agency Awards", "readOnlyHint": True, "destructiveHint": False})
 async def get_agency_awards(
     toptier_code: str,
     fiscal_year: int | None = None,
@@ -1135,7 +1135,7 @@ async def get_agency_awards(
     return await _get(f"/api/v2/agency/{code}/awards/", params=params)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get NAICS Details", "readOnlyHint": True, "destructiveHint": False})
 async def get_naics_details(code: str) -> dict[str, Any]:
     """Get details for a NAICS code (2-6 digits).
 
@@ -1149,7 +1149,7 @@ async def get_naics_details(code: str) -> dict[str, Any]:
     return await _get(f"/api/v2/references/naics/{code.strip()}/")
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get PSC Filter Tree", "readOnlyHint": True, "destructiveHint": False})
 async def get_psc_filter_tree(
     path: str = "",
 ) -> dict[str, Any]:
@@ -1165,7 +1165,7 @@ async def get_psc_filter_tree(
     return await _get(endpoint)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"title": "Get State Profile", "readOnlyHint": True, "destructiveHint": False})
 async def get_state_profile(state_fips: str) -> dict[str, Any]:
     """Get spending profile for a US state by its 2-digit FIPS code.
 
