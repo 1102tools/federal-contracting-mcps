@@ -1,0 +1,60 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Sync dev deps
+        run: uv sync --dev
+      - name: Run tests
+        run: uv run pytest tests/test_validation.py -q
+
+  build:
+    name: Build distributions
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Build
+        run: uv build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/gsa-calc-mcp/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
