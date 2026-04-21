@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gsa-calc-mcp"
 version = "0.2.3"
 description = "MCP server for the GSA CALC+ Labor Ceiling Rates API. GSA MAS schedule rate benchmarking for IGCEs and price analysis."
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [

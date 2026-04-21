@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "bls-oews-mcp"
 version = "0.2.3"
 description = "MCP server for the BLS Occupational Employment and Wage Statistics (OEWS) API. Market wage data for IGCEs and price analysis."
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
