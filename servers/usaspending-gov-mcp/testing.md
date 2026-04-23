@@ -7,14 +7,15 @@ This Model Context Protocol server exposes the USASpending.gov REST API as 17 ca
 | Metric | Value |
 |---|---|
 | MCP tools exposed | 17 |
-| Total regression tests | 634 (467 offline, 167 live-gated) |
-| Tests per tool | 37.3 (gold-standard tier alongside sam-gov-mcp at 45.5 and gsa-perdiem-mcp at 28.7) |
-| Audit rounds completed | 6 |
+| Total regression tests | 738 (467 offline, 271 live-gated) |
+| Tests per tool | 43.4 (gold-standard tier alongside sam-gov-mcp at 45.5 and gsa-perdiem-mcp at 68.8) |
+| Audit rounds completed | 7 (2 of which are live audits) |
 | Initial integration issues (round 1) | 28+ |
 | P1 silent-wrong-data bugs found and fixed | 10 |
 | P2 validation gaps found and fixed | 7 (5 from rounds 1-3, 2 from round 6 live audit: PSC tree trailing slash, list[str] int coercion mismatch) |
-| Release cycles | 7 (v0.1.2 through v0.2.8) |
-| Current release | 0.2.8 |
+| Round 7 deep live audit findings | 0 (validates round 6 fixes covered the gaps) |
+| Release cycles | 8 (v0.1.2 through v0.2.9) |
+| Current release | 0.2.9 |
 | PyPI status | Published as `usaspending-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
 
 ## What Was Tested
@@ -112,6 +113,7 @@ Regression tests invoke tools through the FastMCP registry (`mcp.call_tool`) rat
 | 0.2.6 | Tool annotations and per-server repository URLs | No code changes affecting tool behavior |
 | 0.2.7 | Round 5 density expansion: 415 new tests across 19 failure-mode buckets | 477 total (+415 regressions); 3.6 → 28.1 tests per tool |
 | 0.2.8 | Round 6 live audit: 157 new live-gated tests covering every tool against production USASpending API | 634 total (+157 regressions); 28.1 → 37.3 tests per tool. 2 P2 bugs found and fixed: get_psc_filter_tree trailing-slash 301 redirect; list[str] int coercion mismatch on naics_codes/psc_codes/etc across 4 tools. |
+| 0.2.9 | Round 7 deep live audit: 104 new live-gated tests targeting round-6 gaps (detail tool chaining with real IDs, IDV all 3 child_types, loans, sort/order variations, deep PSC tree, compound filters returning zero, pagination at depth, real prime+agency combos, all 6 award_types) | 738 total (+104 regressions); 37.3 → 43.4 tests per tool. Zero new bugs found. |
 
 ## Cross-MCP Context
 
@@ -140,6 +142,6 @@ Evaluators: James Jenrette, 1102tools, with Claude Code Opus 4.7 (1M context, ma
 
 Testing spanned four rounds from integration stress testing through live API audits and response-shape guards. The live regression suite runs against the USASpending.gov production API when enabled with `USASPENDING_LIVE_TESTS=1`.
 
-Test count: 634 regression tests (467 offline + 167 live-gated). Tests per tool: 37.3 (gold-standard tier). P1 bugs found and fixed: 10. P2 validation gaps closed: 7 (5 from rounds 1-3, 2 from round 6 live audit). Integration issues closed in round 1: 28+. Release cycles: 7. Current version: 0.2.8. PyPI: `usaspending-gov-mcp`.
+Test count: 738 regression tests (467 offline + 271 live-gated). Tests per tool: 43.4 (gold-standard tier). P1 bugs found and fixed: 10. P2 validation gaps closed: 7. Round 7 deep live audit findings: 0 (validates round 6 coverage). Integration issues closed in round 1: 28+. Release cycles: 8. Current version: 0.2.9. PyPI: `usaspending-gov-mcp`.
 
 Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/usaspending-gov-mcp. License: MIT.

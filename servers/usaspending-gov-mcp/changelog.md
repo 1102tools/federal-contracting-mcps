@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.2.9
+
+Round 7: deep live audit (104 new live-gated tests). Zero new server bugs
+found, validating round 6's two fixes covered the gaps. The two test
+failures during this round were both test-author errors (wrong sort field
+name "Action Date" instead of "Last Modified Date"; wrong HTTP code
+expectation 404 vs actual 400 on invalid FIPS), not MCP bugs.
+
+### Round 7 coverage targets (gaps from round 6)
+
+Bucket | Count | Coverage
+---|---|---
+A. Detail tools with REAL chained IDs | 9 | get_award_detail, get_transactions, get_award_funding chained from real search results
+B. IDV children all 3 child_types | 4 | child_awards, child_idvs, grandchild_awards
+C. Loan award searches | 3 | award_type='loans' with default sort, amount filter, response shape
+D. Direct payments + Other | 3 | award_type='direct_payments', 'other', 'grants'
+E. Sort and order variations | 4 | Last Modified Date, Recipient Name, asc/desc
+F. Deep PSC tree drilldowns | 5 | Research and Development, Services, Products, trailing/leading slash handling
+G. Compound filters returning zero | 3 | Impossibly specific filters, invalid NAICS
+H. Pagination at depth | 3 | page=20, 50, 100
+I. Real prime + agency combos | 7 | Lockheed at Navy/Air Force, Booz at Treasury, GD at Navy, Raytheon, Northrop, awarding_subagency
+J. Award amount edge cases | 4 | $0, $1, $1B+, exact match
+K. High-volume agency deep-dives | 6 | DoD, HHS grants, NASA, DHS, VA, State
+L. Agency overview deep checks | 3 | DoD, HHS, NASA response shape
+M. NAICS details deep checks | 3 | 2-digit, invalid 6-digit, description presence
+N. State profile deep checks | 2 | Totals, state field
+O. spending_by_category deep checks | 6 | Top 10 recipients, NAICS+DoD, district, county, country, CFDA grants
+P. Autocomplete deep checks | 5 | 4-char PSC, 2-char PSC partial, NAICS int query, full code, max limit
+Q. lookup_piid format variations | 4 | Full NAVSEA, full Air Force, nonexistent, max limit + GSA Schedule, OASIS+, DLA, full DoD
+R. spending_over_time deep checks | 3 | Decade span, single quarter, NAICS+agency
+S. Funding vs awarding agency | 2 | funding_agency alone, mixed funding+awarding
+T. Date window edge cases | 3 | One day, FY2008 oldest, year span
+U. PSC + NAICS coercion validation | 3 | Multiple PSCs, int coercion (round 6 fix verification), mixed types
+V. Set-aside deep coverage | 3 | EDWOSB, VSA, multi-set-aside
+W. lookup_piid format variations | 4 | GSA hyphens, OASIS+, DLA, full DoD
+X. Cross-tool ID passing workflows | 2 | search → IDV children, search → funding
+Y. Response field verification at scale | 3 | Required fields per result, grants recipient, IDV last date
+Z. Concurrent stress | 2 | 10 concurrent searches, 8 concurrent agencies
+AA. Agency name edge cases | 2 | EPA, HUD
+BB. Invalid-but-well-formed inputs | 3 | Nonexistent agency code, invalid FIPS, unusual NAICS
+
+### Test counts after round 7
+
+- `tests/test_validation.py`: 62 (52 offline + 10 live-gated, unchanged)
+- `tests/test_density_r5.py`: 415 offline parameterized tests
+- `tests/test_live_audit_r6.py`: 157 live-gated tests
+- `tests/test_live_audit_r7.py`: 104 live-gated tests
+- **Total: 738 regression tests (467 offline, 271 live-gated)**
+- **Density: 43.4 tests per tool** (17 tools)
+
+### Why zero bugs is meaningful here
+
+Round 6 added the live-audit lens to a previously offline-only test suite
+and immediately found 2 P2 bugs (PSC tree trailing slash, list[str] int
+coercion). Round 7 stress-tested the same surface from different angles
+and found nothing. That's the round 7 finding: the round 6 fixes were
+complete, and the deeper areas (detail tool chaining, IDV children, loans,
+sort/order, deep PSC tree, compound filters) all work as documented.
+
 ## 0.2.8
 
 Round 6: live audit. 157 new live-gated tests covering every tool against
