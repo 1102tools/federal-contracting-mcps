@@ -553,7 +553,7 @@ def test_clean_error_body_passthrough_non_html():
 
 def test_user_agent_matches_version():
     from bls_oews_mcp.constants import USER_AGENT
-    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.6" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_api_key_status_whitespace_flagged():

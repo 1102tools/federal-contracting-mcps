@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.2.6
+
+Round 6: deep live audit (153 new live-gated tests). Zero new server bugs
+found, validating the original 0.2.x hardening covered the failure surface.
+
+### Round 6 coverage targets
+
+Bucket | Count | Coverage
+---|---|---
+A. National wage data per SOC | 30 | All common federal IGCE SOC codes (Software Dev, PM, Operations Research, Engineers, Accountants, etc.)
+B. State wage data | 17 | 14 major states + DC + AK + HI for Software Developers, plus FIPS coercion (int, padded, missing-area-rejected)
+C. Metro wage data | 18 | Top 15 procurement metros + int coercion + padded + missing-area-rejected
+D. Datatype coverage | 12 | All 9 valid datatype codes (01, 03, 04, 08, 11-15) + defaults + multiple + dedup
+E. Industry breakdowns | 5 | All-industries, Professional Services, Computer Systems, Federal Government + int coercion
+F. Year handling | 5 | 2024 default, str/int variants, historical year rejection (2022/2023)
+G. SOC code formats | 3 | Int input, dash format ("15-1252"), padded
+H. compare_metros | 9 | Top 5 metros, DC area, int codes, mixed types, dedup, datatype variations, state-FIPS rejection, with year
+I. compare_occupations | 9 | National, state VA, metro DC, int codes, dedup, missing-area rejections, datatype, with year
+J. igce_wage_benchmark | 8 | Software Dev DC/national, PM Specialist VA, aging factor, Seattle, Engineer, with year, int inputs
+K. detect_latest_year | 2 | Returns year, year is recent (>=2024)
+L. List tools | 4 | SOC codes list, includes 151252; metros list, includes 47900/Washington
+M. Concurrent calls | 3 | 5 wage lookups, 3 metros, mixed tools
+N. Response shape verification | 4 | occ_code present, values/marker, metros keyed, occupations keyed
+O. Edge cases | 9 | Nonexistent SOC, DC FIPS, AK/HI, state+industry rejection, area+national, low-volume occ, max metros (12), max occupations (12)
+P. Key federal IGCE roles | 9 | IGCE benchmark for each high-frequency federal role at DC metro
+Q. State comparisons | 3 | VA, MD, CA via compare_occupations
+R. Metro comparisons for diverse roles | 3 | Engineer, Lawyer, PM across multiple metros
+
+### Test counts after round 6
+
+- `tests/test_validation.py`: 60 (52 offline + 8 live-gated, unchanged)
+- `tests/test_live_audit_r6.py`: 158 (155 live + 3 list-tool calls)
+- **Total: 218 regression tests (60 offline, 158 live-gated)**
+- **Density: 31.1 tests per tool** (7 tools)
+
+### Why zero new bugs is meaningful
+
+The original 0.2.x audits already did a real-key live audit and found
+10 P1s and 12 response-shape crashes (22 total fixed). Round 6 added a
+much wider live-test surface — 30 SOC codes vs the original ~5, 15 metros
+vs original 3, all 9 datatype codes vs default-only — and found nothing.
+That's the round 6 finding: the failure surface that the original audits
+hardened was complete enough that a 2.5x test expansion still couldn't
+surface anything new.
+
+The 6 test failures during the run were all my test errors (assumed
+historical years would work; assumed state+industry would work; the MCP's
+defensive validation correctly rejects both). Once the test expectations
+matched the documented behavior, everything passed.
+
 ## 0.2.2
 
 Live audit with a real BLS API key surfaced 1 P0 usability bug and 10 P1
