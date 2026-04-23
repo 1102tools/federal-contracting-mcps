@@ -11,7 +11,7 @@ PSC_PATH = "/prod/locationservices/v1/api/publicpscdetails"
 CONTRACT_AWARDS_PATH = "/contract-awards/v1/search"
 
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "sam-gov-mcp/0.3.6"
+USER_AGENT = "sam-gov-mcp/0.3.7"
 
 # Hard caps from the SAM.gov API (enforce client-side to give good errors)
 ENTITY_MAX_SIZE = 10          # Entity Management has a hard cap of 10

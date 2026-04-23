@@ -177,12 +177,17 @@ _SAFE_INT_ERROR_VALUES = (None, "", "null", "None")
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
-    """Coerce value to int, handling None/empty/'null' that SAM.gov sometimes returns."""
+    """Coerce value to int, handling None/empty/'null' that SAM.gov sometimes returns.
+
+    Round 7 punishment-suite fix: also catches OverflowError from inf/nan
+    floats. Without it, _safe_int(float('inf')) crashed instead of returning
+    the default.
+    """
     if value in _SAFE_INT_ERROR_VALUES:
         return default
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -1139,6 +1144,13 @@ def _normalize_awards_response(data: dict[str, Any]) -> dict[str, Any]:
         data["totalRecords"] = _safe_int(data["totalRecords"], default=0)
     if "awardSummary" in data:
         data["awardSummary"] = _as_list(data["awardSummary"])
+    # Round 7 punishment-suite fix: ensure callers always see at least
+    # totalRecords. An empty dict from a CDN proxy used to return {} unchanged,
+    # which broke downstream code that checked data["totalRecords"].
+    if "totalRecords" not in data and "awardSummary" not in data:
+        data["totalRecords"] = 0
+        data["awardSummary"] = []
+        data["_note"] = "Empty or unrecognized response shape from upstream."
     return data
 
 
