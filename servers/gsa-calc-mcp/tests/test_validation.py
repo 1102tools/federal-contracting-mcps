@@ -1020,9 +1020,9 @@ def test_vendor_rate_card_name_too_long():
 
 
 # USER_AGENT freshness
-def test_user_agent_bumped_022():
+def test_user_agent_bumped_026():
     from gsa_calc_mcp.constants import USER_AGENT
-    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.6" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---------------------------------------------------------------------------
