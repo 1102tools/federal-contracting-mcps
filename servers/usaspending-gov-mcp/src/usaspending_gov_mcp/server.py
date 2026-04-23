@@ -291,18 +291,18 @@ def _build_filters(
     funding_agency: str | None = None,
     recipient_name: str | None = None,
     recipient_uei: str | None = None,
-    award_ids: list[str] | None = None,
-    naics_codes: list[str] | None = None,
-    psc_codes: list[str] | None = None,
-    set_aside_type_codes: list[str] | None = None,
-    extent_competed_type_codes: list[str] | None = None,
-    contract_pricing_type_codes: list[str] | None = None,
+    award_ids: list[str | int] | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
+    extent_competed_type_codes: list[str | int] | None = None,
+    contract_pricing_type_codes: list[str | int] | None = None,
     time_period_start: str | None = None,
     time_period_end: str | None = None,
     award_amount_min: float | None = None,
     award_amount_max: float | None = None,
     place_of_performance_state: str | None = None,
-    def_codes: list[str] | None = None,
+    def_codes: list[str | int] | None = None,
 ) -> dict[str, Any]:
     """Build a USASpending filters object from flattened parameters."""
     filters: dict[str, Any] = {}
@@ -440,17 +440,17 @@ async def search_awards(
     awarding_subagency: str | None = None,
     funding_agency: str | None = None,
     recipient_name: str | None = None,
-    naics_codes: list[str] | None = None,
-    psc_codes: list[str] | None = None,
-    set_aside_type_codes: list[str] | None = None,
-    extent_competed_type_codes: list[str] | None = None,
-    contract_pricing_type_codes: list[str] | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
+    extent_competed_type_codes: list[str | int] | None = None,
+    contract_pricing_type_codes: list[str | int] | None = None,
     time_period_start: str | None = None,
     time_period_end: str | None = None,
     award_amount_min: float | None = None,
     award_amount_max: float | None = None,
     place_of_performance_state: str | None = None,
-    award_ids: list[str] | None = None,
+    award_ids: list[str | int] | None = None,
     sort: str | None = None,
     order: Literal["asc", "desc"] = "desc",
     limit: int = 25,
@@ -585,11 +585,11 @@ async def get_award_count(
     awarding_subagency: str | None = None,
     funding_agency: str | None = None,
     recipient_name: str | None = None,
-    naics_codes: list[str] | None = None,
-    psc_codes: list[str] | None = None,
-    set_aside_type_codes: list[str] | None = None,
-    extent_competed_type_codes: list[str] | None = None,
-    contract_pricing_type_codes: list[str] | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
+    extent_competed_type_codes: list[str | int] | None = None,
+    contract_pricing_type_codes: list[str | int] | None = None,
     time_period_start: str | None = None,
     time_period_end: str | None = None,
     award_amount_min: float | None = None,
@@ -649,8 +649,8 @@ async def spending_over_time(
     awarding_agency: str | None = None,
     awarding_subagency: str | None = None,
     recipient_name: str | None = None,
-    naics_codes: list[str] | None = None,
-    psc_codes: list[str] | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
     award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other"] | None = None,
     time_period_start: str | None = None,
     time_period_end: str | None = None,
@@ -705,10 +705,10 @@ async def spending_by_category(
     keywords: list[str] | None = None,
     awarding_agency: str | None = None,
     awarding_subagency: str | None = None,
-    naics_codes: list[str] | None = None,
-    psc_codes: list[str] | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
     award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other"] | None = None,
-    set_aside_type_codes: list[str] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
     time_period_start: str | None = None,
     time_period_end: str | None = None,
     limit: int = 10,
@@ -1159,9 +1159,12 @@ async def get_psc_filter_tree(
     'Service/R/' to get the service professional services tree, or
     'Product/5' for product codes starting with 5.
     """
+    # P2 bug fix in 0.2.8: USASpending PSC filter tree endpoint requires
+    # a trailing slash. Without it, the API returns HTTP 301 redirect.
+    # Caught by round 6 live audit.
     endpoint = "/api/v2/references/filter_tree/psc/"
     if path:
-        endpoint = f"{endpoint}{path.lstrip('/')}"
+        endpoint = f"{endpoint}{path.lstrip('/').rstrip('/')}/"
     return await _get(endpoint)
 
 

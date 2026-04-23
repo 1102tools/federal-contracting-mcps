@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.2.8
+
+Round 6: live audit. 157 new live-gated tests covering every tool against
+the production USASpending.gov API. Two real bugs found and fixed.
+
+### P2 bug: get_psc_filter_tree returned HTTP 301 on any non-empty path
+
+USASpending's PSC filter tree endpoint requires a trailing slash. The MCP
+constructed paths without one (`/api/v2/references/filter_tree/psc/Service`
+instead of `/api/v2/references/filter_tree/psc/Service/`), causing the API
+to return HTTP 301 with the corrected URL. The MCP did not follow redirects,
+so the tool errored on every drilldown. Fix: append trailing slash on
+non-empty paths. Caught by round 6 live audit.
+
+### P2 bug: list[str] type hints rejected int values across 4 search tools
+
+The internal `_coerce_code_list` helper accepts both str and int values
+and coerces ints to strings. But the tool signatures declared
+`naics_codes: list[str] | None`, so pydantic rejected int inputs at the
+public boundary before they reached the coercion logic. The pre-existing
+test `test_naics_codes_accepts_ints` only exercised the helper directly
+(not through `mcp.call_tool`), so the gap was invisible until live audit.
+Fix: type hints widened from `list[str]` to `list[str | int]` on all 7
+code-list parameters across search_awards, get_award_count, spending_over_time,
+spending_by_category. Public API is now consistent with the helper's behavior
+and the docstring promises.
+
+### Round 6 live test coverage (157 tests, runtime ~80 seconds)
+
+Each test makes a real HTTP call against api.usaspending.gov and verifies
+behavior that mocks cannot see. USASpending is keyless so no API key is
+required. Skipped automatically when `USASPENDING_LIVE_TESTS=1` is not set.
+
+Bucket | Count | Coverage
+---|---|---
+A. search_awards | 30 | Real keyword searches, NAICS/PSC/state/amount/recipient/date/set-aside/pricing/competition filters, all award_types, pagination, compound filters, unicode keywords, PIID-prefix searches
+B. get_award_count | 7 | Filter combinations, set-aside, amount range, recipient, NAICS
+C. spending_over_time | 7 | All 3 group values (fiscal_year, quarter, month), keyword/NAICS filters, multi-year span
+D. spending_by_category | 11 | Parameterized across 8 categories (recipient, awarding_agency, naics, psc, etc.) plus filter combinations and max limit
+E. Agency tools | 27 | All 10 major federal agencies (DoD, HHS, NASA, DHS, VA, Treasury, Education, DoE, USDA, Commerce) tested against get_agency_overview and get_agency_awards, plus FY filters and toptier code normalization
+F. NAICS details | 11 | Real codes at every depth (2-digit, 3-digit, 4-digit, 6-digit) including 541512, 541611, 236220, 541990
+G. PSC filter tree | 5 | Top-level + drilldowns + response shape verification (after the trailing-slash fix)
+H. State profiles | 13 | Major state FIPS codes (CA, TX, FL, NY, PA, IL, OH, GA, NC, MI, VA, MD, DC)
+I. Autocomplete | 22 | 10 PSC + 10 NAICS queries plus exclude_retired flag behavior
+J. lookup_piid | 6 | NAVSEA, AFRL, Army, NAVAIR, DLA, GSA Schedule prefixes
+K. Concurrent calls | 3 | 5 concurrent searches, 3 concurrent agency lookups, mixed-tool concurrency
+L. Response shape verification | 9 | Per-tool field presence checks that catch upstream API drift
+M. Edge cases | 8 | Leap year dates, FY rollover window, multi-NAICS, unicode, apostrophes, high pagination, compound filters, award_ids filter
+
+### Test counts after round 6
+
+- `tests/test_validation.py`: 62 (52 offline + 10 live-gated, unchanged from rounds 1-4)
+- `tests/test_density_r5.py`: 415 offline parameterized tests
+- `tests/test_live_audit_r6.py`: 157 live-gated tests
+- **Total: 634 regression tests (467 offline, 167 live-gated)**
+- **Density: 37.3 tests per tool** (17 tools)
+
+### Why this round mattered
+
+Round 5 was offline density expansion. It found zero new bugs because it
+didn't test the live API. Round 6 hit the live API hard and found two
+real bugs within the first 200 calls, including one (the int-coercion
+mismatch) where a pre-existing test gave false confidence by exercising
+the helper directly instead of through the public MCP boundary. This is
+exactly what live audits exist to catch.
+
 ## 0.2.7
 
 Round 5 density expansion. No code changes to `server.py`. The audit added
