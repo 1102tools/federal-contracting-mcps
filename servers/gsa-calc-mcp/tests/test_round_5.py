@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 5: Hypothesis-driven punishment suite + extensive live audit.
+"""Round 5: Hypothesis-driven property test suite + extensive live audit.
 
 Combines lessons from sam-gov-mcp round 7 (Hypothesis caught 2 P3 bugs),
 usaspending round 6/7 (live audit caught 2 P2 bugs), and gsa-perdiem

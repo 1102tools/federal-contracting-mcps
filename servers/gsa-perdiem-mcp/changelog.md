@@ -34,7 +34,7 @@ M. Edge cases | 12 | DC special case, Alaska/Hawaii remote handling, January vs 
 
 ### Why this round mattered
 
-Per Diem already had the highest test density in the suite at 28.7 per
+Per Diem was already at 28.7 tests per
 tool from the original 0.2.x audits. Round 6 added 240 live tests on
 top and found zero new bugs. That's not the round being weak; that's
 proof the original hardening covered the failure surface completely.

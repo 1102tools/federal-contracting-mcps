@@ -2,7 +2,7 @@
 
 ## 0.2.6
 
-Round 5: Hypothesis-driven offline punishment suite + extensive live audit.
+Round 5: Hypothesis-driven offline property test suite + extensive live audit.
 197 new test functions (~25,000 random probes via Hypothesis + 122 live API
 calls across all 8 tools). Zero new bugs found, validating the rounds 1-4
 hardening covered the failure surface.
@@ -47,7 +47,7 @@ O. Historical regression sanity | 3 | Apostrophe, no-filter rejection, extra='fo
 ### Test counts after round 5
 
 - `tests/test_validation.py`: 117 (offline + 9 live-gated, unchanged)
-- `tests/test_punishment_r5.py`: 197 (95 offline Hypothesis + 102 live)
+- `tests/test_round_5.py`: 197 (95 offline Hypothesis + 102 live)
 - **Total: 314 regression tests (212 offline, 102 live-gated)**
 - **Density: 39.3 tests per tool** (8 tools)
 

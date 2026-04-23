@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 7: Offline punishment suite.
+"""Round 7: Offline property test suite.
 
 Hypothesis-driven property tests + extreme mock response fuzzing.
 Generates ~25,000 actual probes across ~80 test functions. Targets

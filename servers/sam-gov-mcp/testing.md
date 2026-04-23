@@ -9,7 +9,7 @@ This Model Context Protocol server exposes four SAM.gov REST APIs (Entity Manage
 | MCP tools exposed | 15 |
 | Total regression tests | 816 (574 offline, 242 live-gated) |
 | Tests per tool | 54.4 |
-| Audit rounds completed | 7 (rounds 1-4 + density expansion + live audit + Hypothesis punishment) |
+| Audit rounds completed | 7 (rounds 1-4 + density expansion + live audit + Hypothesis property tests) |
 | Total items addressed | 49 across multiple releases |
 | P1 silent-wrong-data bugs (live-audit-only) | 4 |
 | P3 edge cases (Hypothesis-only) | 2 (inf/nan in _safe_int; empty dict in _normalize_awards_response) |
@@ -48,7 +48,7 @@ Prior unit tests in v0.2.x awaited raw coroutines and relied on mocks that guess
 | 0.3.1 | Live audit with a real SAM.gov API key | 3 P1 silent-wrong-data plus 1 P3 |
 | 0.3.5 | Round 5: density expansion with 369 new parameterized tests across 10 failure-mode buckets | No new bugs; coverage lifted from 5.3 to 29.9 tests per tool |
 | 0.3.6 | Round 6: live audit with 235 new live-gated tests covering every tool against production SAM.gov API | 1 P1 silent-bug found and fixed: search_exclusions(entity_name=...) sent invalid API parameter name `entityName`; corrected to `exclusionName`. Coverage lifted to 45.5 tests per tool. |
-| 0.3.7 | Round 7: Hypothesis-driven offline punishment suite with 133 new test functions (~25,000 random probes) | 2 P3 edge cases found and fixed: `_safe_int` crashed on inf/nan floats (only caught TypeError/ValueError, not OverflowError); `_normalize_awards_response` returned `{}` unchanged on empty CDN responses (downstream callers expecting `totalRecords` would crash). Coverage lifted to 54.4 tests per tool. |
+| 0.3.7 | Round 7: Hypothesis-driven offline property test suite with 133 new test functions (~25,000 random probes) | 2 P3 edge cases found and fixed: `_safe_int` crashed on inf/nan floats (only caught TypeError/ValueError, not OverflowError); `_normalize_awards_response` returned `{}` unchanged on empty CDN responses (downstream callers expecting `totalRecords` would crash). Coverage lifted to 54.4 tests per tool. |
 
 ### Live audit status
 
@@ -139,7 +139,7 @@ Regression tests invoke tools through the FastMCP registry (`mcp.call_tool`) rat
 | 0.3.0 | Rounds 1 through 4 full audit: 28+ items including WAF calibration, response-shape crashes, input validation | 5 P1 crashes, multiple P2 validation gaps resolved |
 | 0.3.1 | Live audit with a real SAM.gov API key: 3 P1 silent-wrong-data plus 1 P3 translation fix | WAF filter recalibrated against reality; `extra='forbid'` invented and back-ported to all 7 sibling MCPs |
 | 0.3.4 | Tool annotations and per-server repository URLs | No code changes affecting tool behavior |
-| 0.3.5 | Round 5 density expansion: 369 new tests across 10 failure-mode buckets | 79 → 448 tests; 5.3 → 29.9 tests per tool; now the most-tested MCP in the suite |
+| 0.3.5 | Round 5 density expansion: 369 new tests across 10 failure-mode buckets | 79 → 448 tests; 5.3 → 29.9 tests per tool;  |
 
 ## Cross-MCP Context
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 5: Hypothesis punishment + extensive live audit for federal-register-mcp.
+"""Round 5: Hypothesis property tests + extensive live audit for federal-register-mcp.
 
 Federal Register API is keyless and rate-limit-free. Live testing aggressive.
 """

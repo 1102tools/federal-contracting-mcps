@@ -2,13 +2,13 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes the GSA Per Diem Rates API as 6 callable tools for federal travel lodging and M&IE rate lookups used in IGCEs and travel cost estimation. It was hardened across seven audit rounds, with two of those rounds being live audits against the production API. The original 0.2.x audit surfaced three catastrophic silent-wrong-data bugs that could never have been caught with mocks, including a typographic-apostrophe bug that silently returned Andover rates for Martha's Vineyard queries. Round 7 added 240 new live-gated tests covering 50 states, 20 ZIP codes, all 12 months, FY2020-FY2026, and concurrent-call patterns. Round 7 found ZERO new bugs, validating the depth of the original hardening. Testing surfaced 55 bugs total. The MCP ships with 413 regression tests (165 offline plus 248 live-gated). At 68.8 tests per tool, this is the highest test density in the 1102tools MCP suite.
+This Model Context Protocol server exposes the GSA Per Diem Rates API as 6 callable tools for federal travel lodging and M&IE rate lookups used in IGCEs and travel cost estimation. It was hardened across seven audit rounds, with two of those rounds being live audits against the production API. The original 0.2.x audit surfaced three catastrophic silent-wrong-data bugs that could never have been caught with mocks, including a typographic-apostrophe bug that silently returned Andover rates for Martha's Vineyard queries. Round 7 added 240 new live-gated tests covering 50 states, 20 ZIP codes, all 12 months, FY2020-FY2026, and concurrent-call patterns. Round 7 found ZERO new bugs, validating the depth of the original hardening. Testing surfaced 55 bugs total. The MCP ships with 413 regression tests (165 offline plus 248 live-gated) at 68.8 tests per tool.
 
 | Metric | Value |
 |---|---|
 | MCP tools exposed | 6 |
 | Total regression tests | 413 (165 offline, 248 live-gated) |
-| Tests per tool | 68.8 (highest density in 1102tools MCP suite) |
+| Tests per tool | 68.8 |
 | Audit rounds completed | 7 |
 | P0 catastrophic bugs found and fixed | 1 (path traversal) |
 | P1 silent-wrong-data bugs found and fixed | 23 |
@@ -169,6 +169,6 @@ Evaluators: James Jenrette, 1102tools, with Claude Code Opus 4.7 (1M context, ma
 
 Testing spanned six rounds including response-shape fuzzing, validation gap audit, static review, initial patch integration, and a round-6 live audit with a real `api.data.gov` key that surfaced three catastrophic P1 silent-wrong-data bugs. The live regression suite runs against the production Per Diem API when enabled with `PERDIEM_LIVE_TESTS=1`.
 
-Test count: 413 regression tests (165 offline + 248 live-gated). Tests per tool: 68.8 (highest density in 1102tools MCP suite). P0 catastrophic bugs found and fixed: 1. P1 bugs found and fixed: 23. P2 validation gaps closed: 21. P3 cleanup items closed: 10. Total findings: 55. Round 7 (second live audit): 0 findings. Current version: 0.2.5. PyPI: `gsa-perdiem-mcp`.
+Test count: 413 regression tests (165 offline + 248 live-gated). Tests per tool: 68.8. P0 catastrophic bugs found and fixed: 1. P1 bugs found and fixed: 23. P2 validation gaps closed: 21. P3 cleanup items closed: 10. Total findings: 55. Round 7 (second live audit): 0 findings. Current version: 0.2.5. PyPI: `gsa-perdiem-mcp`.
 
 Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/gsa-perdiem-mcp. License: MIT.

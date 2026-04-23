@@ -2,7 +2,7 @@
 
 ## 0.2.10
 
-Round 8: Hypothesis-driven punishment suite + bonus live tests. 69 new
+Round 8: Hypothesis-driven property test suite + bonus live tests. 69 new
 tests (~25,000 random probes via Hypothesis + 10 live API calls). Zero
 new bugs found, validating that the round-6 fixes plus the original
 hardening covered the failure surface completely.
@@ -42,7 +42,7 @@ N. Bonus live tests | 10 | int NAICS coercion live, PSC tree extra slashes, unic
 - `tests/test_density_r5.py`: 415 offline parameterized tests
 - `tests/test_live_audit_r6.py`: 157 live-gated tests
 - `tests/test_live_audit_r7.py`: 104 live-gated tests
-- `tests/test_punishment_r8.py`: 69 (59 offline Hypothesis + 10 live)
+- `tests/test_round_8.py`: 69 (59 offline Hypothesis + 10 live)
 - **Total: 807 regression tests (526 offline, 281 live-gated)**
 - **Density: 47.5 tests per tool** (17 tools)
 
@@ -229,7 +229,7 @@ sam-gov-mcp (29.9) and gsa-perdiem-mcp (28.7).
 ### Why this matters
 Each new test exercises a distinct failure mode. No padding, no shape
 duplicates. Density of 28.1 tests per tool puts USASpending in the same
-tier as the most-tested MCPs in the 1102tools suite. Future regressions
+tier as the well-tested MCPs in the suite. Future regressions
 in input validation, type coercion, or response-shape handling will be
 caught by pytest before they hit users.
 

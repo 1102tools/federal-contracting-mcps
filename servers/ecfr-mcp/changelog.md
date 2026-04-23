@@ -2,7 +2,7 @@
 
 ## 0.2.5
 
-Round 6: Hypothesis-driven punishment suite + extensive live audit.
+Round 6: Hypothesis-driven property test suite + extensive live audit.
 138 new test functions (~25,000 random probes via Hypothesis + 100+ live
 calls across all 13 tools). Two real bugs found and fixed.
 
@@ -36,7 +36,7 @@ K. Live tests (~100 calls) | 100+ | 18 CFR titles, 10 FAR clauses, 5 DFARS claus
 ### Test counts after round 6
 
 - `tests/test_validation.py`: 102 (89 offline + 13 live-gated)
-- `tests/test_punishment_r6.py`: 138 (40 offline Hypothesis + 98 live)
+- `tests/test_round_6.py`: 138 (40 offline Hypothesis + 98 live)
 - **Total: 240 regression tests (134 offline, 106 live-gated)**
 - **Density: 18.5 tests per tool** (13 tools)
 

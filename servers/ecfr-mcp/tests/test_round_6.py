@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 6: Hypothesis-driven punishment + extensive live audit.
+"""Round 6: Hypothesis-driven property tests + extensive live audit.
 
 eCFR is keyless and rate-limit-free. Live testing can be aggressive.
 Combines:

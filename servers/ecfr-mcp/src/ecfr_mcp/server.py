@@ -59,7 +59,7 @@ def _as_list(value: Any) -> list[Any]:
 def _safe_int(value: Any, default: int | None = None) -> int | None:
     """Coerce value to int. Returns default for None/""/'null'/non-parseable.
 
-    Round 6 punishment-suite fix: also catches OverflowError from inf/nan
+    Round 6 fix: also catches OverflowError from inf/nan
     floats. Without it, _safe_int(float('inf')) crashed instead of returning
     the default.
     """

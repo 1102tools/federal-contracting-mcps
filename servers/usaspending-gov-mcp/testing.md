@@ -9,12 +9,12 @@ This Model Context Protocol server exposes the USASpending.gov REST API as 17 ca
 | MCP tools exposed | 17 |
 | Total regression tests | 807 (526 offline, 281 live-gated) |
 | Tests per tool | 47.5 |
-| Audit rounds completed | 8 (2 live audits + 1 Hypothesis punishment round) |
+| Audit rounds completed | 8 (2 live audits + 1 Hypothesis property test round) |
 | Initial integration issues (round 1) | 28+ |
 | P1 silent-wrong-data bugs found and fixed | 10 |
 | P2 validation gaps found and fixed | 7 |
 | Round 7 deep live audit findings | 0 |
-| Round 8 Hypothesis punishment findings | 0 (validators clean across ~25,000 random probes) |
+| Round 8 Hypothesis property tests findings | 0 (validators clean across ~25,000 random probes) |
 | Release cycles | 9 (v0.1.2 through v0.2.10) |
 | Current release | 0.2.10 |
 | PyPI status | Published as `usaspending-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
@@ -115,7 +115,7 @@ Regression tests invoke tools through the FastMCP registry (`mcp.call_tool`) rat
 | 0.2.7 | Round 5 density expansion: 415 new tests across 19 failure-mode buckets | 477 total (+415 regressions); 3.6 → 28.1 tests per tool |
 | 0.2.8 | Round 6 live audit: 157 new live-gated tests covering every tool against production USASpending API | 634 total (+157 regressions); 28.1 → 37.3 tests per tool. 2 P2 bugs found and fixed: get_psc_filter_tree trailing-slash 301 redirect; list[str] int coercion mismatch on naics_codes/psc_codes/etc across 4 tools. |
 | 0.2.9 | Round 7 deep live audit: 104 new live-gated tests targeting round-6 gaps (detail tool chaining with real IDs, IDV all 3 child_types, loans, sort/order variations, deep PSC tree, compound filters returning zero, pagination at depth, real prime+agency combos, all 6 award_types) | 738 total (+104 regressions); 37.3 → 43.4 tests per tool. Zero new bugs found. |
-| 0.2.10 | Round 8 Hypothesis-driven punishment suite + 10 bonus live tests: 69 new test functions running ~25,000 random probes through every validator (date, clamp, code lists, control chars, toptier normalization, fiscal year, dict response, error body cleaning, strings list); plus async concurrency stress, encoding edge cases (unicode normalization, RTL, BOM, ZWSP, emoji), composite tool deep tests | 807 total (+69 regressions); 43.4 → 47.5 tests per tool. Zero new bugs found - validators clean across the full random input space. |
+| 0.2.10 | Round 8 Hypothesis-driven property test suite + 10 bonus live tests: 69 new test functions running ~25,000 random probes through every validator (date, clamp, code lists, control chars, toptier normalization, fiscal year, dict response, error body cleaning, strings list); plus async concurrency stress, encoding edge cases (unicode normalization, RTL, BOM, ZWSP, emoji), composite tool deep tests | 807 total (+69 regressions); 43.4 → 47.5 tests per tool. Zero new bugs found - validators clean across the full random input space. |
 
 ## Cross-MCP Context
 
@@ -144,6 +144,6 @@ Evaluators: James Jenrette, 1102tools, with Claude Code Opus 4.7 (1M context, ma
 
 Testing spanned four rounds from integration stress testing through live API audits and response-shape guards. The live regression suite runs against the USASpending.gov production API when enabled with `USASPENDING_LIVE_TESTS=1`.
 
-Test count: 807 regression tests (526 offline + 281 live-gated). Tests per tool: 47.5. P1 bugs found and fixed: 10. P2 validation gaps closed: 7. Round 7 deep live audit findings: 0. Round 8 Hypothesis punishment findings: 0 (validators clean across ~25,000 random probes). Integration issues closed in round 1: 28+. Release cycles: 9. Current version: 0.2.10. PyPI: `usaspending-gov-mcp`.
+Test count: 807 regression tests (526 offline + 281 live-gated). Tests per tool: 47.5. P1 bugs found and fixed: 10. P2 validation gaps closed: 7. Round 7 deep live audit findings: 0. Round 8 Hypothesis property tests findings: 0 (validators clean across ~25,000 random probes). Integration issues closed in round 1: 28+. Release cycles: 9. Current version: 0.2.10. PyPI: `usaspending-gov-mcp`.
 
 Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/usaspending-gov-mcp. License: MIT.

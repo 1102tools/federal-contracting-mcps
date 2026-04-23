@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 4: Hypothesis punishment + extensive live audit for regulations-gov-mcp.
+"""Round 4: Hypothesis property tests + extensive live audit for regulations-gov-mcp.
 
 Requires REGULATIONS_GOV_API_KEY (api.data.gov key, 1000/hr).
 """

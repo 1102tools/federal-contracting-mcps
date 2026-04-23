@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Round 8: Hypothesis-driven punishment suite + bonus live tests.
+"""Round 8: Hypothesis-driven property test suite + bonus live tests.
 
 Round 6 found 2 P2 bugs (PSC tree trailing slash, list[str] int coercion).
 Round 7 found zero new bugs across 104 deeper live tests.

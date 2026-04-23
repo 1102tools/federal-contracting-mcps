@@ -179,7 +179,7 @@ _SAFE_INT_ERROR_VALUES = (None, "", "null", "None")
 def _safe_int(value: Any, default: int = 0) -> int:
     """Coerce value to int, handling None/empty/'null' that SAM.gov sometimes returns.
 
-    Round 7 punishment-suite fix: also catches OverflowError from inf/nan
+    Round 7 fix: also catches OverflowError from inf/nan
     floats. Without it, _safe_int(float('inf')) crashed instead of returning
     the default.
     """
@@ -1144,7 +1144,7 @@ def _normalize_awards_response(data: dict[str, Any]) -> dict[str, Any]:
         data["totalRecords"] = _safe_int(data["totalRecords"], default=0)
     if "awardSummary" in data:
         data["awardSummary"] = _as_list(data["awardSummary"])
-    # Round 7 punishment-suite fix: ensure callers always see at least
+    # Round 7 fix: ensure callers always see at least
     # totalRecords. An empty dict from a CDN proxy used to return {} unchanged,
     # which broke downstream code that checked data["totalRecords"].
     if "totalRecords" not in data and "awardSummary" not in data:
