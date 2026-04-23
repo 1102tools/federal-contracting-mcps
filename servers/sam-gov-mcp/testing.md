@@ -2,17 +2,17 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes four SAM.gov REST APIs (Entity Management v3, Exclusions v4, Opportunities v2, Contract Awards v1) plus the PSC lookup as 15 callable tools. It was hardened across five audit rounds plus a live audit with a real SAM.gov API key. The live audit surfaced three catastrophic P1 silent-wrong-data bugs that could never have been caught with mocks, including a WAF filter that was locally rejecting McDonald's and L'Oreal when SAM.gov actually accepts them. This MCP is also where the `extra='forbid'` cross-fix pattern was invented, then back-ported to seven other MCPs in the suite. Round 5 added 369 new parameterized tests organized into 10 distinct failure-mode buckets, lifting density to 29.9 tests per tool, the highest in the 1102tools MCP suite. The MCP ships with 448 regression tests (441 offline plus 7 live-gated).
+This Model Context Protocol server exposes four SAM.gov REST APIs (Entity Management v3, Exclusions v4, Opportunities v2, Contract Awards v1) plus the PSC lookup as 15 callable tools. It was hardened across six audit rounds. Live audits surfaced four catastrophic P1 silent-wrong-data bugs that could never have been caught with mocks: three from the original 0.3.1 live audit (apostrophe-rejecting WAF, typo'd-parameter silent drops, empty PIID acceptance) and one from the round 6 live audit (search_exclusions sending the wrong API parameter name). This MCP is also where the `extra='forbid'` cross-fix pattern was invented, then back-ported to seven other MCPs in the suite. Round 5 added 369 offline parameterized tests for density expansion. Round 6 added 235 live-gated tests covering every tool against the production SAM.gov API. The MCP ships with 683 regression tests (441 offline plus 242 live-gated), the highest test count in the 1102tools MCP suite at 45.5 tests per tool.
 
 | Metric | Value |
 |---|---|
 | MCP tools exposed | 15 |
-| Total regression tests | 448 (441 offline, 7 live-gated) |
-| Tests per tool | 29.9 (gold standard in suite, exceeding GSA Per Diem at 28.7) |
-| Audit rounds completed | 5 plus a live-key audit round |
-| Total items addressed | 46 across multiple releases |
-| P1 silent-wrong-data bugs (live-audit-only) | 3 |
-| Current release | 0.3.5 |
+| Total regression tests | 683 (441 offline, 242 live-gated) |
+| Tests per tool | 45.5 (highest density in the 1102tools MCP suite) |
+| Audit rounds completed | 6 (rounds 1-4 + density expansion + live audit) |
+| Total items addressed | 47 across multiple releases |
+| P1 silent-wrong-data bugs (live-audit-only) | 4 |
+| Current release | 0.3.6 |
 | PyPI status | Published as `sam-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
 
 ## What Was Tested
@@ -46,6 +46,7 @@ Prior unit tests in v0.2.x awaited raw coroutines and relied on mocks that guess
 | 0.3.0 | Rounds 1 through 4: full audit covering WAF, response-shape, validation, integrity | 28+ items including 5 response-shape crashes |
 | 0.3.1 | Live audit with a real SAM.gov API key | 3 P1 silent-wrong-data plus 1 P3 |
 | 0.3.5 | Round 5: density expansion with 369 new parameterized tests across 10 failure-mode buckets | No new bugs; coverage lifted from 5.3 to 29.9 tests per tool |
+| 0.3.6 | Round 6: live audit with 235 new live-gated tests covering every tool against production SAM.gov API | 1 P1 silent-bug found and fixed: search_exclusions(entity_name=...) sent invalid API parameter name `entityName`; corrected to `exclusionName`. Coverage lifted to 45.5 tests per tool. |
 
 ### Live audit status
 
@@ -166,6 +167,6 @@ Evaluators: James Jenrette, 1102tools, with Claude Code Opus 4.7 (1M context, ma
 
 Testing spanned four audit rounds in 0.3.0 (WAF, response-shape, validation, integrity) plus a live-key audit round in 0.3.1 that surfaced three catastrophic silent-wrong-data bugs. The live regression suite runs against the production SAM.gov API when enabled with `SAM_LIVE_TESTS=1`.
 
-Test count: 448 regression tests (441 offline + 7 live-gated). Tests per tool: 29.9 (gold standard in the 1102tools MCP suite). Total items addressed across releases: 46. P1 silent-wrong-data bugs surfaced only in live audit: 3. Response-shape crashes found and fixed: 5. Current version: 0.3.5. PyPI: `sam-gov-mcp`.
+Test count: 683 regression tests (441 offline + 242 live-gated). Tests per tool: 45.5 (highest in the 1102tools MCP suite). Total items addressed across releases: 47. P1 silent-bugs surfaced only in live audit: 4 (3 from 0.3.1, 1 from 0.3.6). Response-shape crashes found and fixed: 5. Current version: 0.3.6. PyPI: `sam-gov-mcp`.
 
 Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/sam-gov-mcp. License: MIT.

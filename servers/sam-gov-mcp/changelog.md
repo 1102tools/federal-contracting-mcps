@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.3.6
+
+Round 6: live audit. 235 new live-gated tests covering every tool against
+the production SAM.gov API. One P1 bug found and fixed.
+
+### P1 silent-bug found in round 6 live audit
+
+`search_exclusions(entity_name=...)` sent the API parameter `entityName`
+which SAM.gov rejects as `INVALID_SEARCH_PARAMETER`. The correct upstream
+field is `exclusionName`. Anyone calling search_exclusions with a name
+filter got an HTTP 400 with no result. Fix: parameter mapping changed from
+`entityName` to `exclusionName` in server.py. The tool's own `entity_name`
+parameter name stays the same to preserve the public interface.
+
+### Round 6 live test coverage (235 tests, runtime ~3-5 minutes)
+
+Each test makes a real HTTP call against api.sam.gov and verifies behavior
+that mocks cannot see. Skipped automatically when `SAM_LIVE_TESTS=1` is
+not set so default pytest runs stay fast.
+
+Bucket | Count | Coverage
+---|---|---
+A. WAF behavior live | 17 | Apostrophes (McDonald's, L'Oreal, O'Brien, etc.), ampersands, unicode, angle brackets, SQL keywords all confirmed accepted by SAM.gov
+B. Entity lookups | 13 | UEI/CAGE lookups across all `include_sections` combinations, lowercase normalization, whitespace stripping, nonexistent UEI handling
+C. Entity search | 20 | `legal_business_name` partial matching, `free_text` search, NAICS/state/business-type filters, pagination at high pages, combined filters
+D. Exclusions | 10 | Country filters, classification types (Firm/Individual/Vessel/Special Entity), state filtering, exclusion programs, name searches via `exclusionName`
+E. Vendor responsibility check | 5 | Real UEIs through the full 2-API-call composite, flag list verification, padding/whitespace handling
+F. Opportunities | 21 | All 14 set-aside codes, all 9 notice types, NAICS/state/zip filters, compound filters, 364-day span boundary
+G. Contract awards | 16 | All fiscal years FY2008-FY2026, NAICS with `~`/`!` operators, PSC filtering, PIID/UEI/CAGE/awardee lookups, dept code filtering, modification number filtering, AWARD vs IDV distinction
+H. PSC lookups | 16 | Real codes across categories (R, D, AJ, B, J, Y, Z), free-text queries (cyber, professional, engineering, etc.), unicode and apostrophe queries
+I. Entity deep sections | 5 | Reps and certs (summary + full mode), integrity info (FAPIIS proceedings)
+J. Search deleted awards | 5 | Previously zero coverage; now exercises pagination, dept code filtering, max limit
+K. Concurrent calls | 3 | 5 concurrent searches, 3 concurrent lookups, mixed-tool concurrency
+L. Response shape verification | 10 | Per-tool field presence checks that catch upstream API drift
+M. Edge cases | 11 | Unicode CJK, emoji, max-length names, single-day windows, padded UEIs
+N-S. Exhaustive coverage | 89 | Every set-aside code, every notice type, every supported FY, top procurement NAICS and states, common PSC categories
+
+### Test counts after round 6
+
+- `tests/test_validation.py`: 79 (73 offline + 6 live-gated, unchanged from rounds 1-4)
+- `tests/test_density_r5.py`: 369 offline parameterized tests
+- `tests/test_live_audit_r6.py`: 235 live-gated tests
+- **Total: 683 regression tests (441 offline, 242 live-gated)**
+- **Density: 45.5 tests per tool** (15 tools)
+
+### Why this round mattered
+
+Round 5 was a coverage expansion against the existing code. Round 5 found
+zero new bugs because it didn't test the live API. Round 6 hit the live
+API hard and immediately found a real bug (entity_name) that had been
+shipping broken for at least one release cycle. This is exactly what the
+0.3.1 release record predicted: "live audit surfaces bugs mocks cannot
+catch." The pattern held.
+
 ## 0.3.5
 
 Round 5 density expansion. No code changes to `server.py`. The audit added

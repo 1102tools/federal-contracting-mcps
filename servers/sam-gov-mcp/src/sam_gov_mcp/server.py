@@ -852,7 +852,9 @@ async def search_exclusions(
         "size": str(size),
     }
     if entity_name:
-        params["entityName"] = entity_name
+        # P1 bug fix in 0.3.6: SAM API rejects entityName as INVALID_SEARCH_PARAMETER.
+        # Correct param name is exclusionName. Caught by round 6 live audit.
+        params["exclusionName"] = entity_name
     if cage_code:
         params["cageCode"] = cage_code
     if classification:
