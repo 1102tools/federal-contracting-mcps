@@ -116,6 +116,12 @@ _DOC_NUMBER_RE = re.compile(r"^(?:C\d-)?\d{4}-\d{5}$")
 
 
 def _validate_doc_number(value: str, *, field: str = "document_number") -> str:
+    # Round 5 punishment-suite fix: handle None and non-string inputs cleanly
+    # instead of crashing with AttributeError.
+    if value is None:
+        raise ValueError(f"{field} cannot be empty.")
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string. Got {type(value).__name__}.")
     stripped = value.strip()
     if not stripped:
         raise ValueError(f"{field} cannot be empty.")
@@ -145,7 +151,15 @@ _H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
 
 
 def _clean_error_body(text: str) -> str:
-    """Strip HTML from upstream error bodies so error messages stay readable."""
+    """Strip HTML from upstream error bodies so error messages stay readable.
+
+    Round 5 punishment-suite fix: coerce non-string inputs to string instead
+    of crashing with TypeError when the API returns a None/dict/list body.
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
     if not _HTML_ERROR_RE.search(text):
         return text[:400]
     pieces: list[str] = []

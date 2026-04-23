@@ -338,7 +338,7 @@ def test_get_document_accepts_correction_prefix():
 
 def test_user_agent_version_matches():
     from federal_register_mcp.constants import USER_AGENT
-    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.6" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_clean_error_body_strips_html():
@@ -609,7 +609,7 @@ def test_ensure_json_container_rejects_string():
 
 def test_user_agent_matches_version():
     from federal_register_mcp.constants import USER_AGENT
-    assert "0.2.2" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.6" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---- LIVE tests ----
