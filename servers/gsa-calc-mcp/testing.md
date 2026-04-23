@@ -2,19 +2,21 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes the GSA CALC+ Labor Ceiling Rates API as 8 callable tools for IGCE development, price reasonableness analysis, and federal labor market research. It was hardened across four live audit rounds plus an initial WAF-calibration pass. Testing surfaced 86 bugs total (74 in the initial full audit plus 12 in retroactive deep audits), including the signature `filtered_browse()` bug that returned 265,000 unfiltered records on a zero-argument call. The MCP ships with 117 regression tests (109 offline plus 8 live-gated) that run on every change and can be executed against the real public CALC+ API on demand.
+This Model Context Protocol server exposes the GSA CALC+ Labor Ceiling Rates API as 8 callable tools for IGCE development, price reasonableness analysis, and federal labor market research. It was hardened across five audit rounds. The original 0.2.x audits surfaced 86 bugs total (74 in the initial full audit plus 12 in retroactive deep audits), including the signature `filtered_browse()` bug that returned 265,000 unfiltered records on a zero-argument call. Round 5 added a Hypothesis-driven offline punishment suite (~25,000 random probes through every validator) plus 122 new live tests covering all 8 tools. Round 5 found zero new bugs, validating the depth of prior hardening. The MCP ships with 314 regression tests (212 offline plus 102 live-gated).
 
 | Metric | Value |
 |---|---|
 | MCP tools exposed | 8 |
-| Total regression tests | 117 (109 offline, 8 live-gated) |
-| Audit rounds completed | 4 retroactive live rounds + initial WAF pass |
+| Total regression tests | 314 (212 offline, 102 live-gated) |
+| Tests per tool | 39.3 |
+| Audit rounds completed | 5 (4 retroactive live + initial WAF pass + Hypothesis punishment & extensive live) |
 | P1 crashes (shape-shift) found and fixed | 19 |
 | P1 silent-wrong-data bugs found and fixed | 30 |
 | P2 validation gaps found and fixed | 19 |
 | P3 cleanup items found and fixed | 6 |
+| Round 5 Hypothesis + live findings | 0 (validates prior hardening) |
 | Retroactive additional findings | 12 |
-| Current release | 0.2.2 |
+| Current release | 0.2.6 |
 | PyPI status | Published as `gsa-calc-mcp`, auto-publishes via Trusted Publisher on tag push |
 
 ## What Was Tested
