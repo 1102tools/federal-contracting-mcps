@@ -20,7 +20,7 @@ All source lives under `servers/<name>/`. Each server is self-contained: manifes
 - [federal-register-mcp](servers/federal-register-mcp) — proposed rules, final rules, notices, executive orders, FAR cases
 - [regulations-gov-mcp](servers/regulations-gov-mcp) — federal rulemaking dockets, public comments, comment period tracking
 
-Combined: 82 deterministic tool calls, 719 regression tests, 8 audit programs, roughly 350 bugs fixed during hardening.
+Combined: 82 deterministic tool calls, 2,639 regression tests, 8 audit programs, roughly 350 bugs fixed during hardening.
 
 ## Install
 
