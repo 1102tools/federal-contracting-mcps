@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "regulationsgov-mcp",
   "display_name": "Regulations.gov",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "MCP server for Regulations.gov. Federal rulemaking dockets, documents, comments, and comment period tracking.",
-  "long_description": "Queries the Regulations.gov API for federal rulemaking dockets, proposed rules, final rules, public comments, and comment period tracking. Useful for FAR case monitoring and regulatory intake during proposed rule comment windows.\n\n8 tools. Optional api.data.gov key for 1,000 req/hr. Without a key the server falls back to DEMO_KEY at severe rate limits (30/hr, 50/day).\n\nHardened across 3 audit rounds with 51 regression tests. 22 findings fixed including 1 P0 catastrophic bug and 10 P1 silent-wrong-data bugs surfaced during the broad live sweep.",
+  "long_description": "Queries the Regulations.gov API for federal rulemaking dockets, proposed rules, final rules, public comments, and comment period tracking. Useful for FAR case monitoring and regulatory intake during proposed rule comment windows.\n\n8 tools. Optional api.data.gov key for 1,000 req/hr. Without a key the server falls back to DEMO_KEY at severe rate limits (30/hr, 50/day).\n\nHardened across 4 audit rounds with 177 regression tests (22.1 per tool). 22 findings fixed including 1 P0 catastrophic bug and 10 P1 silent-wrong-data bugs surfaced during the broad live sweep. Round 4 added Hypothesis-driven punishment (~25,000 random probes) plus 100+ live tests covering 20 federal agencies, all 5 document types, all 2 docket types, and 47 search terms. Zero new bugs found in round 4.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",

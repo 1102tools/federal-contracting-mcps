@@ -391,7 +391,7 @@ def test_search_documents_no_flag_when_real_results():
 
 def test_user_agent_matches_version():
     from regulationsgov_mcp.constants import USER_AGENT
-    assert "0.2.0" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.2.4" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 def test_safe_dict():
