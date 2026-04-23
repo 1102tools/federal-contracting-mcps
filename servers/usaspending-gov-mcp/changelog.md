@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.2.10
+
+Round 8: Hypothesis-driven punishment suite + bonus live tests. 69 new
+tests (~25,000 random probes via Hypothesis + 10 live API calls). Zero
+new bugs found, validating that the round-6 fixes plus the original
+hardening covered the failure surface completely.
+
+### Why zero bugs is meaningful
+
+The same Hypothesis approach found 2 P3 bugs in sam-gov-mcp (round 7).
+The fact that it found zero in usaspending-gov-mcp reflects a structural
+difference: usaspending uses `_ensure_dict_response` which raises on
+non-dict inputs (no normalization gap to exploit), and its validators
+are pydantic-pre-validated on the public boundary. The validators that
+Hypothesis stress-tested all handled the full random input space without
+crashing.
+
+### Round 8 coverage (69 functions, ~25,000 probes + 10 live calls)
+
+Bucket | Functions | Notes
+---|---|---
+A. _validate_date | 4 + 8 specific | YYYY-MM-DD generators, calendar edge cases
+B. _clamp_limit | 2 | sys.maxsize values, in-range passthrough
+C. _coerce_code_list | 2 + 2 specific | None/list/int coercion, empty/whitespace rejection
+D. _validate_no_control_chars | 3 | Every codepoint 0-31 rejected, clean strings pass
+E. _normalize_toptier | 3 | Padding behavior, 0-99 → 3-digit
+F. _validate_fiscal_year | 3 | 2008..current valid, below/above rejected
+G. _ensure_dict_response | 2 | Dict passthrough, non-dict raises
+H. _clean_error_body | 3 | Random text, HTML titles, h1 extraction
+I. _validate_strings_no_control_chars | 1 + 2 specific | Lists with control chars
+J. Async concurrency stress | 3 | 50 concurrent + 100 mixed + 50 sequential
+K. Encoding edge cases | 10 + 5 specific | Unicode normalization, RTL, BOM, ZWSP, emoji
+L. Integer overflow | 1 | sys.maxsize bounds
+M. Composite tool deep tests | 5 specific | lookup_piid input variants
+N. Bonus live tests | 10 | int NAICS coercion live, PSC tree extra slashes, unicode recipient, emoji keyword, max pagination, NAICS sectors, top-10 state profiles, 50 concurrent live searches, decade-span aggregation, lowercase PIID
+
+### Test counts after round 8
+
+- `tests/test_validation.py`: 62 (52 offline + 10 live-gated)
+- `tests/test_density_r5.py`: 415 offline parameterized tests
+- `tests/test_live_audit_r6.py`: 157 live-gated tests
+- `tests/test_live_audit_r7.py`: 104 live-gated tests
+- `tests/test_punishment_r8.py`: 69 (59 offline Hypothesis + 10 live)
+- **Total: 807 regression tests (526 offline, 281 live-gated)**
+- **Density: 47.5 tests per tool** (17 tools)
+
 ## 0.2.9
 
 Round 7: deep live audit (104 new live-gated tests). Zero new server bugs

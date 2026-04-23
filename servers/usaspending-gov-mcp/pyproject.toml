@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "usaspending-gov-mcp"
-version = "0.2.9"
+version = "0.2.10"
 description = "MCP server for USASpending.gov federal contract and award data"
 readme = "readme.md"
 requires-python = ">=3.10"
@@ -43,4 +43,6 @@ packages = ["src/usaspending_gov_mcp"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
 ]
