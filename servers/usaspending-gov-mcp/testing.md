@@ -2,18 +2,19 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes the USASpending.gov REST API as 17 callable tools for federal contract and award research. It was hardened across five release cycles and four audit rounds, including a deep live audit against the production USASpending.gov API. Testing surfaced 15 priority issues plus more than 28 additional integration bugs, all of which were fixed before the current release. The MCP ships with 62 regression tests that run on every change and a live-gated suite that can be executed against the real API on demand.
+This Model Context Protocol server exposes the USASpending.gov REST API as 17 callable tools for federal contract and award research. It was hardened across five release cycles and five audit rounds, including a deep live audit against the production USASpending.gov API and a round 5 density expansion. Testing surfaced 15 priority issues plus more than 28 additional integration bugs, all of which were fixed before the current release. Round 5 added 415 new parameterized tests organized into 19 distinct failure-mode buckets, lifting density to 28.1 tests per tool, in the same tier as sam-gov-mcp (29.9) and gsa-perdiem-mcp (28.7). The MCP ships with 477 regression tests (467 offline plus 10 live-gated).
 
 | Metric | Value |
 |---|---|
 | MCP tools exposed | 17 |
-| Total regression tests | 62 (52 offline, 10 live-gated) |
-| Audit rounds completed | 4 |
+| Total regression tests | 477 (467 offline, 10 live-gated) |
+| Tests per tool | 28.1 (gold-standard tier alongside sam-gov-mcp and gsa-perdiem-mcp) |
+| Audit rounds completed | 5 |
 | Initial integration issues (round 1) | 28+ |
 | P1 silent-wrong-data bugs found and fixed | 10 |
 | P2 validation gaps found and fixed | 5 |
-| Release cycles | 5 (v0.1.2 through v0.2.3) |
-| Current release | 0.2.3 |
+| Release cycles | 6 (v0.1.2 through v0.2.7) |
+| Current release | 0.2.7 |
 | PyPI status | Published as `usaspending-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
 
 ## What Was Tested
@@ -46,6 +47,7 @@ Prior unit tests in v0.1.x awaited raw coroutines directly, which bypassed the F
 | 2 | Targeted live probes on edge cases (null bytes, negative amounts, empty-string arrays, whitespace IDs, retired NAICS codes, reversed date ranges) | 49 probes | 9 P1 silent-wrong-data, 4 P2 validation |
 | 3 | Deep live stress (compound filters, pagination boundaries at page 200 and 201, leap-year dates, 10-year spans, amount boundaries, unicode, agency name variations, 5 concurrent calls) | 52 probes | 1 additional P1: `search_awards()` with no filter arguments silently returned 25 unfiltered recent contracts |
 | 4 | Response-shape mock fuzzing (None, bare list, int, string where a dict was expected) | 15 probes | Response-shape guard gap |
+| 5 | Density expansion: 415 new parameterized tests across 19 failure-mode buckets covering every input field on every tool | 415 tests | No new bugs; coverage lifted from 3.6 to 28.1 tests per tool |
 
 ### Live audit status
 
@@ -86,11 +88,12 @@ The `_post` and `_get` helpers now guarantee a dict return via `_ensure_dict_res
 
 ## Test Coverage
 
-The repo ships 62 regression tests across four files. All 62 pass on every release cycle.
+The repo ships 477 regression tests across five files (467 offline + 10 live-gated). All pass on every release cycle.
 
 | File | Purpose | Test count |
 |---|---|---|
-| `tests/test_validation.py` | Main regression suite covering every round-1 through round-4 finding, plus 10 live-gated integration tests | 62 |
+| `tests/test_validation.py` | Rounds 1-4 plus live-gated integration tests covering every documented finding | 62 (52 offline + 10 live-gated) |
+| `tests/test_density_r5.py` | Round 5 density expansion. Parameterized tests across 19 failure-mode buckets. Every date-taking parameter on every search tool, every paginated tool's limit/page boundaries, every text input's control-character safety, every tool's `extra='forbid'` enforcement, all toptier code normalization paths, all fiscal year boundaries, plus direct unit tests on validator helpers | 415 (415 offline) |
 | `tests/stress_test.py` | Round 1 stress test scenarios (retained for reproducibility) | N/A (scenario script) |
 | `tests/stress_test_r2.py` | Round 2 live-audit scenarios (retained for reproducibility) | N/A (scenario script) |
 | `tests/stress_test_r3.py` | Round 3 deep live stress scenarios (retained for reproducibility) | N/A (scenario script) |
@@ -106,6 +109,8 @@ Regression tests invoke tools through the FastMCP registry (`mcp.call_tool`) rat
 | 0.2.1 | Cross-MCP fix discovered during sam-gov-mcp audit: pydantic `extra='forbid'` applied to all tool arg models to prevent typo'd-parameter silent filter-drop bugs | +1 regression test |
 | 0.2.2 | Live audit surfaced 9 P1 silent-wrong-data paths and 4 P2 validation gaps; all fixed | 46 total (+17 regressions) |
 | 0.2.3 | Round 3 deep live stress and round 4 response-shape mock fuzz; added the `search_awards()` no-filter guard and `_ensure_dict_response` guarantee; live-gated regression suite | 62 total (+16 regressions) |
+| 0.2.6 | Tool annotations and per-server repository URLs | No code changes affecting tool behavior |
+| 0.2.7 | Round 5 density expansion: 415 new tests across 19 failure-mode buckets | 477 total (+415 regressions); 3.6 → 28.1 tests per tool |
 
 ## Cross-MCP Context
 
@@ -134,6 +139,6 @@ Evaluators: James Jenrette, 1102tools, with Claude Code Opus 4.7 (1M context, ma
 
 Testing spanned four rounds from integration stress testing through live API audits and response-shape guards. The live regression suite runs against the USASpending.gov production API when enabled with `USASPENDING_LIVE_TESTS=1`.
 
-Test count: 62 regression tests. P1 bugs found and fixed: 10. P2 validation gaps closed: 5. Integration issues closed in round 1: 28+. Release cycles: 5. Current version: 0.2.3. PyPI: `usaspending-gov-mcp`.
+Test count: 477 regression tests (467 offline + 10 live-gated). Tests per tool: 28.1 (gold-standard tier). P1 bugs found and fixed: 10. P2 validation gaps closed: 5. Integration issues closed in round 1: 28+. Release cycles: 6. Current version: 0.2.7. PyPI: `usaspending-gov-mcp`.
 
 Source: github.com/1102tools/federal-contracting-mcps/tree/main/servers/usaspending-gov-mcp. License: MIT.

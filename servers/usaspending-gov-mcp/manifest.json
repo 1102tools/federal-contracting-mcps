@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "usaspending-gov-mcp",
   "display_name": "USASpending.gov",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "MCP server for USASpending.gov federal contract and award data.",
-  "long_description": "Queries the USASpending.gov API for federal contract and award data across all agencies. PIID lookups, vendor award histories, transaction details, agency spending breakdowns, NAICS and PSC analysis, IDV child lookups.\n\n17 tools. No authentication required.\n\nHardened across 4 audit rounds with 62 regression tests. 10 P1 silent-wrong-data bugs fixed (including search_awards() with no filters silently returning 25 unfiltered recent contracts) and 28+ integration issues surfaced when tests switched from raw coroutines to real MCP client pipeline invocation.",
+  "long_description": "Queries the USASpending.gov API for federal contract and award data across all agencies. PIID lookups, vendor award histories, transaction details, agency spending breakdowns, NAICS and PSC analysis, IDV child lookups.\n\n17 tools. No authentication required.\n\nHardened across 5 audit rounds with 477 regression tests (28.1 tests per tool). 10 P1 silent-wrong-data bugs fixed (including search_awards() with no filters silently returning 25 unfiltered recent contracts) and 28+ integration issues surfaced when tests switched from raw coroutines to real MCP client pipeline invocation.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",

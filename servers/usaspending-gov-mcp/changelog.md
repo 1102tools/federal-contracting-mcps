@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.2.7
+
+Round 5 density expansion. No code changes to `server.py`. The audit added
+415 new parameterized regression tests organized into 18 distinct
+failure-mode buckets, lifting suite-wide coverage from 62 tests (3.6 per
+tool) to 477 tests (28.1 per tool). Now in the same density tier as
+sam-gov-mcp (29.9) and gsa-perdiem-mcp (28.7).
+
+### Coverage by failure-mode bucket
+1. Date format validation across every date-taking tool, parameterized
+   across 12 invalid format variants per tool plus 7 calendar-invalid cases
+   including leap year correctness for FY2024 vs FY2025 (~50 tests)
+2. Limit and page boundary checks across every paginated tool: zero,
+   negative, just-above-cap, far-above-cap (~30 tests)
+3. Amount range validation: parameterized across 4 negative values for
+   both award_amount_min and award_amount_max on search_awards and
+   get_award_count, plus min-greater-than-max cross-field check (~17 tests)
+4. List/array filter validation on naics_codes, psc_codes, award_ids,
+   keywords: empty arrays, all-empty-string entries, all-whitespace
+   entries (~12 tests)
+5. Control-character safety: 8 control-char variants × 9 text-input
+   parameters across 5 tools, plus 10 legitimate text cases (apostrophes,
+   unicode, emoji, etc.) verified as accepted (~85 tests)
+6. `extra='forbid'` enforcement parameterized across all 16 tools that
+   accept kwargs, plus explicit historical typo cases (~20 tests)
+7. Award identifier validation across get_award_detail, get_transactions,
+   get_award_funding, get_idv_children: 4 invalid variants per tool (~16 tests)
+8. PIID validation on lookup_piid: 5 length and format variants (~5 tests)
+9. Toptier code normalization: invalid format variants × 2 tools, plus
+   left-padding behavior (3-digit, 2-digit, 1-digit, 4-digit, whitespace) (~17 tests)
+10. Fiscal year boundary checks: zero, negative, pre-2008, far-future,
+    boundary-valid, plus current-FY-plus-one (~7 tests)
+11. NAICS code validation on get_naics_details: 7 invalid format variants
+    plus valid 2-digit and 6-digit cases (~9 tests)
+12. State FIPS validation on get_state_profile: 10 invalid format variants
+    plus 3 valid cases including whitespace handling (~13 tests)
+13. Autocomplete query length and content checks (PSC + NAICS): empty,
+    single-char, whitespace, length cap at 200 chars (~8 tests)
+14. No-filter rejection on search_awards, get_award_count, spending_over_time:
+    empty call, award_type-only, group-only (~6 tests)
+15. Spending-by-category Literal validation, no-filter behavior, limit
+    boundaries (~4 tests)
+16. award_type Literal validation: 6 invalid variants × 2 tools (~12 tests)
+17. order Literal validation: 7 invalid variants × 2 tools (~14 tests)
+18. group / child_type Literal validation (~10 tests)
+19. Direct unit tests on validator helpers: `_validate_date`, `_clamp_limit`,
+    `_coerce_code_list`, `_validate_no_control_chars`, `_validate_strings_no_control_chars`,
+    `_normalize_toptier`, `_validate_fiscal_year`, `_ensure_dict_response`,
+    `_clean_error_body`, `_current_fiscal_year` (~75 tests)
+
+### Test file structure
+- `tests/test_validation.py` (existing 62 tests, unchanged): rounds 1-4 plus
+  live-gated integration tests
+- `tests/test_density_r5.py` (new 415 tests): round 5 density expansion
+
+### Why this matters
+Each new test exercises a distinct failure mode. No padding, no shape
+duplicates. Density of 28.1 tests per tool puts USASpending in the same
+tier as the most-tested MCPs in the 1102tools suite. Future regressions
+in input validation, type coercion, or response-shape handling will be
+caught by pytest before they hit users.
+
 ## 0.2.3
 
 Follow-up hardening after a full playbook pass (round 3 deep live stress,
