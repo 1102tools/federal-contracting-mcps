@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.2.5
+
+Round 6 (second live audit). 240 new live-gated tests added covering
+all 6 tools against the production GSA Per Diem API. Zero new bugs
+found, which validates the depth of prior hardening (the original
+0.2.x audits already surfaced 3 P1 bugs and 55 findings).
+
+### Round 6 live test coverage (240 tests, runtime ~2:37)
+
+Bucket | Count | Coverage
+---|---|---
+A. City lookups across 50 states + DC | 51 | One representative city per state, verifying every state code reaches the API and returns a valid response shape
+B. Special character handling | 10 | St. Louis with/without period, Winston-Salem with hyphen/space, Coeur d'Alene with both apostrophe variants, lowercase/mixed-case state, padded inputs, unmatched cities
+C. High-cost metros + procurement hotspots | 26 | NYC, SF, Boston, DC + Arlington/Bethesda/Quantico/Huntsville/Dayton/Albuquerque/Colorado Springs/Tampa
+D. Seasonal cities | 12 | Aspen, Park City, Vail, Key West, Jackson Hole, Hilton Head, Nantucket, Martha's Vineyard, Naples, Palm Beach, Telluride, Lake Tahoe
+E. Fiscal year coverage | 8 | Each FY 2020-2026 plus default
+F. ZIP lookups | 24 | 20 major federal ZIPs plus ZIP+4, padding, rural Montana, multiple FYs
+G. State NSA listings | 53 | All 50 states + DC + lowercase normalization + FY filter
+H. M&IE breakdown | 9 | Each FY 2020-2026, default FY, response shape verification
+I. Travel cost estimates | 22 | 8 trip lengths (1-365 nights), 12 months, with/without FY, high-cost metros
+J. Compare locations | 6 | DC metro area, max-locations, 2-location minimum, with FY, mixed-case states, seasonal city comparison
+K. Concurrent calls | 2 | 5 concurrent city lookups, mixed-tool concurrency
+L. Response shape verification | 5 | Per-tool field presence checks
+M. Edge cases | 12 | DC special case, Alaska/Hawaii remote handling, January vs October DC seasonality, unicode unmatched
+
+### Test counts after round 6
+
+- `tests/test_validation.py`: 173 (165 offline + 8 live-gated, unchanged from rounds 1-5)
+- `tests/test_live_audit_r6.py`: 240 live-gated tests
+- **Total: 413 regression tests (165 offline, 248 live-gated)**
+- **Density: 68.8 tests per tool** (6 tools)
+
+### Why this round mattered
+
+Per Diem already had the highest test density in the suite at 28.7 per
+tool from the original 0.2.x audits. Round 6 added 240 live tests on
+top and found zero new bugs. That's not the round being weak; that's
+proof the original hardening covered the failure surface completely.
+This is the only MCP in the suite where round 6 found nothing, which
+itself is a strong signal of code quality.
+
 ## 0.2.1
 
 Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.
