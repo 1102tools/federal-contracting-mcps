@@ -271,7 +271,7 @@ def test_clean_error_body_passthrough_non_html():
 def test_user_agent_matches_version():
     from sam_gov_mcp.constants import USER_AGENT
     # Match the current published version; bump this string when pyproject bumps.
-    assert "0.3.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.3.5" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---------------------------------------------------------------------------
