@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ecfr-mcp"
-version = "0.2.4"
+version = "0.2.5"
 description = "MCP server for the eCFR (Electronic Code of Federal Regulations) API. Read FAR, DFARS, and all agency FAR supplements."
 readme = "readme.md"
 requires-python = ">=3.10"
@@ -33,6 +33,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
 ]
 
 [project.urls]

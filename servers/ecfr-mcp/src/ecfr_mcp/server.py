@@ -57,12 +57,17 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _safe_int(value: Any, default: int | None = None) -> int | None:
-    """Coerce value to int. Returns default for None/""/'null'/non-parseable."""
+    """Coerce value to int. Returns default for None/""/'null'/non-parseable.
+
+    Round 6 punishment-suite fix: also catches OverflowError from inf/nan
+    floats. Without it, _safe_int(float('inf')) crashed instead of returning
+    the default.
+    """
     if value in (None, "", "null", "None"):
         return default
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -166,7 +171,8 @@ def _validate_title_number(value: Any, *, field: str = "title_number") -> int:
         raise ValueError(f"{field} must be an int 1-50, not bool.")
     try:
         n = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
+        # OverflowError catches inf/nan float coercion. Round 6 fix.
         raise ValueError(f"{field} must be an int 1-50. Got {value!r}.") from exc
     if n < 1 or n > 50:
         raise ValueError(f"{field} must be between 1 and 50. Got {n}.")

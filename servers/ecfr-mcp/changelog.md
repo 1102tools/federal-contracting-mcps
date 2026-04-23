@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.2.5
+
+Round 6: Hypothesis-driven punishment suite + extensive live audit.
+138 new test functions (~25,000 random probes via Hypothesis + 100+ live
+calls across all 13 tools). Two real bugs found and fixed.
+
+### P3 bug: _safe_int crashed on inf/nan floats
+
+Same bug pattern as sam-gov-mcp 0.3.7. `_safe_int(float('inf'))` raised
+`OverflowError` instead of returning the default. Fix: added OverflowError
+to the except clause.
+
+### P3 bug: _validate_title_number crashed on inf
+
+`int(float('inf'))` raises OverflowError, which the validator's except
+clause did not catch. Now caught alongside TypeError/ValueError.
+
+### Round 6 coverage
+
+Bucket | Functions | Notes
+---|---|---
+A. Shape helpers (_safe_dict/_as_list/_safe_int/_strip_or_none) | 4 | 500 probes each
+B. _clamp / _clamp_str_len | 2 | sys.maxsize bounds
+C. _clean_error_body fuzz | 1 | 500 probes
+D. _validate_date_ymd | 2 + 9 specific | calendar edges
+E. _validate_title_number | 1 + 16 specific | 1-50 range, inf/nan rejection (P3 bug fix)
+F. _coerce_cfr_str | 1 | 500 probes
+G. _validate_chapter | 1 | 500 probes
+H. _validate_query_safe | 1 + 1 specific | null byte rejection
+I. Async concurrency | 2 | 50 concurrent + 50 sequential
+J. Encoding edge cases | 5 specific | unicode, emoji
+K. Live tests (~100 calls) | 100+ | 18 CFR titles, 10 FAR clauses, 5 DFARS clauses (chapter 2), 20 FAR parts, 10 search queries, 8 FAR definitions, 3 ancestry, 3 version history, compare versions, corrections, recent changes, CFR content, concurrent calls, validation rejection live
+
+### Test counts after round 6
+
+- `tests/test_validation.py`: 102 (89 offline + 13 live-gated)
+- `tests/test_punishment_r6.py`: 138 (40 offline Hypothesis + 98 live)
+- **Total: 240 regression tests (134 offline, 106 live-gated)**
+- **Density: 18.5 tests per tool** (13 tools)
+
 ## 0.2.1
 
 Cross-MCP fix discovered during the sam-gov-mcp 0.3.1 live audit.

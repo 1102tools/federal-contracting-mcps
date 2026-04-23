@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "ecfr-mcp",
   "display_name": "eCFR",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "MCP server for the Electronic Code of Federal Regulations (eCFR). Read FAR, DFARS, and all agency FAR supplements.",
-  "long_description": "Queries the eCFR API for current regulatory text updated daily. Provides FAR clause lookups, DFARS lookups, agency FAR supplement access, version history, and full-text CFR search across all 50 titles.\n\n13 tools. No authentication required.\n\nHardened across 5 audit rounds with 101 regression tests covering integration stress, XML parser pathological inputs, URL and injection probes, and concurrency stability. 72 findings fixed including 2 P0 catastrophic bugs and 26 P1 bugs.",
+  "long_description": "Queries the eCFR API for current regulatory text updated daily. Provides FAR clause lookups, DFARS lookups, agency FAR supplement access, version history, and full-text CFR search across all 50 titles.\n\n13 tools. No authentication required.\n\nHardened across 6 audit rounds with 240 regression tests (18.5 per tool). 74 findings fixed including 2 P0 catastrophic bugs, 26 P1 bugs, and 2 P3 OverflowError edge cases (round 6 Hypothesis: _safe_int and _validate_title_number both crashed on inf/nan floats; both fixed). Round 6 added a Hypothesis-driven punishment suite (~25,000 random probes) plus 100+ live tests covering 18 CFR titles, 10 FAR clauses, 5 DFARS clauses, 20 FAR parts, 10 search queries, and 8 FAR definitions.",
   "author": {
     "name": "James Jenrette",
     "email": "hello@1102tools.com",
