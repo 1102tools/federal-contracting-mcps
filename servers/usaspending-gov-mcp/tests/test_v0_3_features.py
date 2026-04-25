@@ -2014,3 +2014,254 @@ def test_q20_real_fixture_passes(tool, kwargs, _, monkeypatch):
     _patch_for(tool, mock, monkeypatch)
     r = asyncio.run(_call(tool, **kwargs))
     assert isinstance(_payload(r), dict)
+
+
+# ===========================================================================
+# list_states focused expansion (special-case tool with array response)
+# ===========================================================================
+
+def _patch_states_client(monkeypatch, json_data):
+    """list_states uses _get_client() directly, not _get/_post."""
+    class _MockResp:
+        def __init__(self, data, status=200):
+            self._data = data
+            self.status_code = status
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = _httpx.Request("GET", "https://api.usaspending.gov/x")
+                resp = _httpx.Response(self.status_code, request=req)
+                raise _httpx.HTTPStatusError(f"HTTP {self.status_code}", request=req, response=resp)
+        def json(self):
+            return self._data
+    class _MC:
+        async def get(self, path):
+            return _MockResp(json_data)
+    monkeypatch.setattr(srv, "_get_client", lambda: _MC())
+
+
+def test_states_q01_array_wrapped(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01"}, {"fips": "02"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r) == {"results": [{"fips": "01"}, {"fips": "02"}], "total": 2}
+
+
+def test_states_q02_empty_array(monkeypatch):
+    _patch_states_client(monkeypatch, [])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r) == {"results": [], "total": 0}
+
+
+def test_states_q03_dict_passthrough(monkeypatch):
+    _patch_states_client(monkeypatch, {"results": [{"fips": "01"}], "page_metadata": {}})
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["fips"] == "01"
+
+
+def test_states_q04_total_count_correct(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": f"{i:02d}"} for i in range(56)])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["total"] == 56
+
+
+def test_states_q05_record_has_code(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "code": "AL"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["code"] == "AL"
+
+
+def test_states_q06_record_has_name(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "name": "Alabama"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["name"] == "Alabama"
+
+
+def test_states_q07_record_has_amount(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "amount": 1.23e9}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["amount"] == 1.23e9
+
+
+def test_states_q08_record_has_count(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "count": 12345}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["count"] == 12345
+
+
+def test_states_q09_record_has_type(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "11", "type": "district"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["type"] == "district"
+
+
+def test_states_q10_dc_included(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "11", "code": "DC", "name": "District of Columbia"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["code"] == "DC"
+
+
+def test_states_q11_pr_included(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "72", "code": "PR", "name": "Puerto Rico"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["code"] == "PR"
+
+
+def test_states_q12_zero_amount_state(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "78", "code": "VI", "amount": 0}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["amount"] == 0
+
+
+def test_states_q13_negative_amount(monkeypatch):
+    """Some states have net negative obligations (deobligations exceed)."""
+    _patch_states_client(monkeypatch, [{"fips": "01", "amount": -1000.0}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["amount"] == -1000.0
+
+
+def test_states_q14_extra_field_per_record(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "_v3_field": "extra"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["_v3_field"] == "extra"
+
+
+def test_states_q15_unicode_name(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01", "name": "Alabamá"}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["name"] == "Alabamá"
+
+
+def test_states_q16_huge_amount(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "06", "amount": 9.99e11}])
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["results"][0]["amount"] == 9.99e11
+
+
+def test_states_q17_dict_with_results_field(monkeypatch):
+    """Future API change wrapping in dict should pass through."""
+    _patch_states_client(monkeypatch, {"results": [{"fips": "01"}], "page_metadata": {"total": 1}})
+    r = asyncio.run(_call("list_states"))
+    assert "page_metadata" in _payload(r)
+
+
+def test_states_q18_invalid_response_type_raises(monkeypatch):
+    """Non-list, non-dict response (e.g. integer) raises clean error."""
+    class _MC:
+        async def get(self, path):
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self): return 42  # weird response
+            return R()
+    monkeypatch.setattr(srv, "_get_client", lambda: _MC())
+    try:
+        asyncio.run(_call("list_states"))
+    except Exception as e:
+        assert "unexpected" in str(e).lower() or "int" in str(e).lower()
+        return
+    raise AssertionError("expected error")
+
+
+def test_states_q19_http_error_surfaced(monkeypatch):
+    """500 from /recipient/state/ surfaces as RuntimeError."""
+    class _MC:
+        async def get(self, path):
+            class R:
+                status_code = 500
+                def raise_for_status(self):
+                    req = _httpx.Request("GET", "https://api.usaspending.gov/x")
+                    resp = _httpx.Response(500, request=req, content=b'{"detail":"db down"}')
+                    raise _httpx.HTTPStatusError("HTTP 500", request=req, response=resp)
+                def json(self): return {}
+            return R()
+    monkeypatch.setattr(srv, "_get_client", lambda: _MC())
+    try:
+        asyncio.run(_call("list_states"))
+    except Exception as e:
+        assert "500" in str(e) or "db down" in str(e).lower()
+        return
+    raise AssertionError("expected error")
+
+
+def test_states_q20_network_error_surfaced(monkeypatch):
+    class _MC:
+        async def get(self, path):
+            raise _httpx.RequestError("connection refused")
+    monkeypatch.setattr(srv, "_get_client", lambda: _MC())
+    try:
+        asyncio.run(_call("list_states"))
+    except Exception as e:
+        assert "network error" in str(e).lower() or "connection" in str(e).lower()
+        return
+    raise AssertionError("expected error")
+
+
+def test_states_q21_50_states_returned(monkeypatch):
+    """Mock 50 states (real API returns 56 inc. territories)."""
+    states = [{"fips": f"{i:02d}", "code": chr(65+i)} for i in range(50)]
+    _patch_states_client(monkeypatch, states)
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["total"] == 50
+
+
+def test_states_q22_56_states_and_territories(monkeypatch):
+    """50 states + 6 territories is the documented complete set."""
+    items = [{"fips": f"{i:02d}"} for i in range(56)]
+    _patch_states_client(monkeypatch, items)
+    r = asyncio.run(_call("list_states"))
+    assert _payload(r)["total"] == 56
+
+
+def test_states_q23_concurrent(monkeypatch):
+    """Multiple concurrent calls."""
+    _patch_states_client(monkeypatch, [{"fips": "01"}])
+    async def _all():
+        return await asyncio.gather(*[_call("list_states") for _ in range(3)])
+    out = asyncio.run(_all())
+    assert all(_payload(r)["total"] == 1 for r in out)
+
+
+def test_states_q24_idempotent(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01"}])
+    a = asyncio.run(_call("list_states"))
+    b = asyncio.run(_call("list_states"))
+    assert _payload(a) == _payload(b)
+
+
+def test_states_q25_no_args_required():
+    """list_states takes no arguments."""
+    asyncio.run(_call_expect_error("list_states", "extra", garbage="x"))
+
+
+def test_states_q26_record_with_full_keys(monkeypatch):
+    """A complete state record includes all documented fields."""
+    rec = {"fips": "06", "code": "CA", "name": "California", "type": "state",
+           "amount": 50e9, "count": 50000}
+    _patch_states_client(monkeypatch, [rec])
+    r = asyncio.run(_call("list_states"))
+    d = _payload(r)["results"][0]
+    assert d["fips"] == "06" and d["code"] == "CA"
+
+
+def test_states_q27_tool_registered():
+    names = {t.name for t in mcp._tool_manager.list_tools()}
+    assert "list_states" in names
+
+
+def test_states_q28_tool_has_docstring():
+    t = mcp._tool_manager.get_tool("list_states")
+    assert t.description and "FIPS" in t.description
+
+
+def test_states_q29_readonly_annotation():
+    t = mcp._tool_manager.get_tool("list_states")
+    ann = t.annotations
+    if hasattr(ann, "readOnlyHint"):
+        assert ann.readOnlyHint is True
+    elif isinstance(ann, dict):
+        assert ann.get("readOnlyHint") is True
+
+
+def test_states_q30_return_type_dict(monkeypatch):
+    _patch_states_client(monkeypatch, [{"fips": "01"}])
+    r = asyncio.run(_call("list_states"))
+    assert isinstance(_payload(r), dict)
