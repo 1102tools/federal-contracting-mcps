@@ -1,0 +1,16 @@
+# Smithery configuration: https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: ["samApiKey"]
+    properties:
+      samApiKey:
+        type: string
+        description: "Free API key from https://sam.gov (sign in, go to Account Details, request a key). Rotates every 90 days; regenerate at sam.gov and update here when it expires."
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['sam-gov-mcp'],
+      env: { SAM_API_KEY: config.samApiKey }
+    })

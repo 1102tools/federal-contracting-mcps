@@ -1,0 +1,12 @@
+# Smithery configuration: https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+    required: []
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['gsa-calc-mcp']
+    })

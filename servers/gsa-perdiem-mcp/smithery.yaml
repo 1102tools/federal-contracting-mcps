@@ -1,0 +1,16 @@
+# Smithery configuration: https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: ["perdiemApiKey"]
+    properties:
+      perdiemApiKey:
+        type: string
+        description: "Free key from https://api.data.gov/signup/. 1,000 req/hr. Same key works for regulations-gov-mcp. DEMO_KEY fallback exists but its 30/hr, 50/day limits are too tight for real use."
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['gsa-perdiem-mcp'],
+      env: { PERDIEM_API_KEY: config.perdiemApiKey }
+    })

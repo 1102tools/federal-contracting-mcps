@@ -1,0 +1,16 @@
+# Smithery configuration: https://smithery.ai/docs
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: ["blsApiKey"]
+    properties:
+      blsApiKey:
+        type: string
+        description: "Free API key from https://data.bls.gov/registrationEngine/. Unlocks the v2 API at 500 queries/day. The v1 fallback (25/day, no key) is too limited for real IGCE work."
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['bls-oews-mcp'],
+      env: { BLS_API_KEY: config.blsApiKey }
+    })
