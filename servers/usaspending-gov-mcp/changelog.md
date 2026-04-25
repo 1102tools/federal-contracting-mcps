@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.3.1
+
+Quality expansion of the v0.3 mock test suite. No functional changes to the
+55 tools beyond two bug fixes uncovered while writing the new mocks.
+
+### Test count expansion
+
+v0.3.0 shipped with 243 tests for the new endpoints (~1-2 distinct mocks
+per concern per tool). v0.3.1 expands to 1,194 tests (1,113 mock + 81 live).
+Per-tool count range: 27-64. Most tools at 30-35.
+
+### How the new mocks were structured
+
+20 cross-cutting parametrized batteries × 38 tools, each battery testing
+ONE specific concern across every applicable tool:
+
+- Path correctness, response passthrough, default value construction
+- HTTP 401, 403, 404, 422, 429, 500, 502, 503 error translation
+- Network error wrapping, timeout error wrapping
+- HTML error body cleaning (no markup leak in error message)
+- Forward-compat (extra unknown response fields preserved)
+- Idempotency (sequential calls produce same result)
+- Concurrent calls share the global httpx client cleanly
+- Tool registered with mcp.list_tools()
+- Tool has docstring; readonly annotation
+- Real-API response fixture (captured live) passes through
+- Unicode in response fields preserved
+- Large response (100+ items) tolerated
+- Null fields tolerated
+- Extreme numeric values pass through
+- Deeply nested response objects pass through
+- Non-dict response rejected (except documented list_states case)
+
+Plus 30 focused mocks for `list_states` (which uses _get_client() directly
+instead of the _post/_get plumbing the cross-cutting batteries patch).
+
+Plus existing per-tool focused tests from v0.3.0.
+
+### Two P1 bugs uncovered while writing v0.3.1 tests
+
+1. **`get_federal_account_object_classes` was using GET, but the API
+   requires POST.** Live audit caught it; fix is `_post(path, {})`.
+2. **`get_federal_account_fy_snapshot` was taking the alphanumeric
+   `account_code` (e.g. "027-5183") but the endpoint requires the numeric
+   `account_id` (e.g. 4595).** Both fields are returned by
+   `list_federal_accounts` so the rename is a parameter clarification.
+   Tool now takes `account_id`.
+
 ## 0.3.0
 
 API surface expansion. Tool count goes from 17 to 55 (+38 new tools).

@@ -470,7 +470,7 @@ def test_autocomplete_psc_length_clamped():
 
 def test_user_agent_matches_version():
     from usaspending_gov_mcp.constants import USER_AGENT
-    assert "0.2.10" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
+    assert "0.3.1" in USER_AGENT, f"USER_AGENT stale: {USER_AGENT}"
 
 
 # ---------------------------------------------------------------------------
