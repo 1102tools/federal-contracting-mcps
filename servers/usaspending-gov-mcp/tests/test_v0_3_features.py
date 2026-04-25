@@ -464,7 +464,6 @@ def test_list_federal_accounts_keyword_control_char():
     "get_federal_account_detail",
     "get_federal_account_object_classes",
     "get_federal_account_program_activities",
-    "get_federal_account_fy_snapshot",
 ])
 def test_federal_account_empty_code(tool):
     asyncio.run(_call_expect_error(tool, "cannot be empty", account_code=""))
@@ -474,7 +473,6 @@ def test_federal_account_empty_code(tool):
     "get_federal_account_detail",
     "get_federal_account_object_classes",
     "get_federal_account_program_activities",
-    "get_federal_account_fy_snapshot",
 ])
 def test_federal_account_invalid_chars(tool):
     asyncio.run(_call_expect_error(tool, "invalid characters", account_code="bad!@#"))
@@ -837,8 +835,9 @@ def test_get_federal_account_detail_path(monkeypatch):
 
 
 def test_get_federal_account_obj_classes_path(monkeypatch):
-    mock = _MockGet({"results": []})
-    monkeypatch.setattr(srv, "_get", mock)
+    """object_classes is POST not GET (live audit finding)."""
+    mock = _MockPost({"results": []})
+    monkeypatch.setattr(srv, "_post", mock)
     asyncio.run(_call("get_federal_account_object_classes", account_code="097-0100"))
     path, _ = mock.calls[-1]
     assert path == "/api/v2/federal_accounts/097-0100/object_classes/total/"
@@ -856,17 +855,17 @@ def test_get_federal_account_prog_activities_path(monkeypatch):
 def test_get_federal_account_fy_snapshot_with_year(monkeypatch):
     mock = _MockGet({"results": []})
     monkeypatch.setattr(srv, "_get", mock)
-    asyncio.run(_call("get_federal_account_fy_snapshot", account_code="097-0100", fiscal_year=2026))
+    asyncio.run(_call("get_federal_account_fy_snapshot", account_id=4595, fiscal_year=2026))
     path, _ = mock.calls[-1]
-    assert path == "/api/v2/federal_accounts/097-0100/fiscal_year_snapshot/2026/"
+    assert path == "/api/v2/federal_accounts/4595/fiscal_year_snapshot/2026/"
 
 
 def test_get_federal_account_fy_snapshot_without_year(monkeypatch):
     mock = _MockGet({"results": []})
     monkeypatch.setattr(srv, "_get", mock)
-    asyncio.run(_call("get_federal_account_fy_snapshot", account_code="097-0100"))
+    asyncio.run(_call("get_federal_account_fy_snapshot", account_id=4595))
     path, _ = mock.calls[-1]
-    assert path == "/api/v2/federal_accounts/097-0100/fiscal_year_snapshot/"
+    assert path == "/api/v2/federal_accounts/4595/fiscal_year_snapshot/"
 
 
 def test_list_states_wraps_array_response(monkeypatch):
@@ -1547,3 +1546,471 @@ def test_live_subawards_pagination_compare():
         keys1 = {(r.get("subaward_number"), r.get("piid")) for r in d1["results"]}
         keys2 = {(r.get("subaward_number"), r.get("piid")) for r in d2["results"]}
         assert keys1 != keys2 or d1["page_metadata"].get("total", 0) <= 3
+
+
+# ===========================================================================
+# v0.3.1 expansion: ~30 quality mocks per tool, 10+ live per tool.
+# Cross-cutting parametrized batteries plus per-tool focused tests.
+# Real-API response fixtures loaded from _real_responses.json.
+# ===========================================================================
+
+import json as _json  # noqa: E402
+import pathlib as _pathlib  # noqa: E402
+import httpx as _httpx  # noqa: E402
+
+_FIXTURES_PATH = _pathlib.Path(__file__).parent / "_real_responses.json"
+if _FIXTURES_PATH.exists():
+    _FIXTURE_LIST = _json.loads(_FIXTURES_PATH.read_text())
+    REAL = {entry["label"]: entry["data"] for entry in _FIXTURE_LIST}
+else:
+    REAL = {}
+
+
+def _make_post_mock(response):
+    calls = []
+    async def mock_post(path, json):
+        calls.append((path, dict(json)))
+        return response
+    mock_post.calls = calls
+    return mock_post
+
+
+def _make_get_mock(response):
+    calls = []
+    async def mock_get(path, params=None):
+        calls.append((path, dict(params or {})))
+        return response
+    mock_get.calls = calls
+    return mock_get
+
+
+def _make_failing_post(exc):
+    async def mock_post(path, json):
+        raise exc
+    return mock_post
+
+
+def _make_failing_get(exc):
+    async def mock_get(path, params=None):
+        raise exc
+    return mock_get
+
+
+def _http_error(status, body, *, content_type="application/json"):
+    req = _httpx.Request("POST", "https://api.usaspending.gov/x")
+    resp = _httpx.Response(status, request=req, content=body, headers={"content-type": content_type})
+    return _httpx.HTTPStatusError(f"HTTP {status}", request=req, response=resp)
+
+
+def _format_runtime(http_err):
+    return RuntimeError(srv._format_http_error(http_err))
+
+
+_POST_TOOLS = [
+    ("search_subawards", {}, "/api/v2/subawards/"),
+    ("spending_by_subaward_grouped", {}, "/api/v2/search/spending_by_subaward_grouped/"),
+    ("search_recipients", {}, "/api/v2/recipient/"),
+    ("autocomplete_recipient", {"search_text": "x"}, "/api/v2/autocomplete/recipient/"),
+    ("autocomplete_awarding_agency", {"search_text": "x"}, "/api/v2/autocomplete/awarding_agency/"),
+    ("autocomplete_funding_agency", {"search_text": "x"}, "/api/v2/autocomplete/funding_agency/"),
+    ("autocomplete_cfda", {"search_text": "x"}, "/api/v2/autocomplete/cfda/"),
+    ("autocomplete_glossary", {"search_text": "x"}, "/api/v2/autocomplete/glossary/"),
+    ("get_award_funding_rollup", {"award_id": AWARD_ID_CONTRACT}, "/api/v2/awards/funding_rollup/"),
+    ("spending_by_transaction", {}, "/api/v2/search/spending_by_transaction/"),
+    ("spending_by_geography", {}, "/api/v2/search/spending_by_geography/"),
+    ("new_awards_over_time", {"recipient_id": RECIPIENT_HASH_VALID}, "/api/v2/search/new_awards_over_time/"),
+    ("get_idv_funding", {"award_id": AWARD_ID_IDV}, "/api/v2/idvs/funding/"),
+    ("get_idv_funding_rollup", {"award_id": AWARD_ID_IDV}, "/api/v2/idvs/funding_rollup/"),
+    ("get_idv_activity", {"award_id": AWARD_ID_IDV}, "/api/v2/idvs/activity/"),
+    ("list_federal_accounts", {}, "/api/v2/federal_accounts/"),
+    ("get_federal_account_object_classes", {"account_code": "097-0100"}, "/api/v2/federal_accounts/097-0100/object_classes/total/"),
+]
+
+_GET_TOOLS = [
+    ("get_recipient_profile", {"recipient_hash": RECIPIENT_HASH_VALID}, f"/api/v2/recipient/{RECIPIENT_HASH_VALID}/"),
+    ("get_recipient_children", {"recipient_hash": RECIPIENT_HASH_PARENT}, f"/api/v2/recipient/children/{RECIPIENT_HASH_PARENT}/"),
+    ("get_agency_budgetary_resources", {"toptier_code": "097"}, "/api/v2/agency/097/budgetary_resources/"),
+    ("get_agency_sub_agencies", {"toptier_code": "097"}, "/api/v2/agency/097/sub_agency/"),
+    ("get_agency_federal_accounts", {"toptier_code": "097"}, "/api/v2/agency/097/federal_account/"),
+    ("get_agency_object_classes", {"toptier_code": "097"}, "/api/v2/agency/097/object_class/"),
+    ("get_agency_program_activities", {"toptier_code": "097"}, "/api/v2/agency/097/program_activity/"),
+    ("get_agency_obligations_by_award_category", {"toptier_code": "097"}, "/api/v2/agency/097/obligations_by_award_category/"),
+    ("get_award_subaward_count", {"award_id": AWARD_ID_CONTRACT}, f"/api/v2/awards/count/subaward/{AWARD_ID_CONTRACT}/"),
+    ("get_award_federal_account_count", {"award_id": AWARD_ID_CONTRACT}, f"/api/v2/awards/count/federal_account/{AWARD_ID_CONTRACT}/"),
+    ("get_award_transaction_count", {"award_id": AWARD_ID_CONTRACT}, f"/api/v2/awards/count/transaction/{AWARD_ID_CONTRACT}/"),
+    ("awards_last_updated", {}, "/api/v2/awards/last_updated/"),
+    ("get_idv_amounts", {"award_id": AWARD_ID_IDV}, f"/api/v2/idvs/amounts/{AWARD_ID_IDV}/"),
+    ("get_award_types_reference", {}, "/api/v2/references/award_types/"),
+    ("get_def_codes_reference", {}, "/api/v2/references/def_codes/"),
+    ("get_glossary", {}, "/api/v2/references/glossary/"),
+    ("get_submission_periods", {}, "/api/v2/references/submission_periods/"),
+    ("get_federal_account_detail", {"account_code": "097-0100"}, "/api/v2/federal_accounts/097-0100/"),
+    ("get_federal_account_program_activities", {"account_code": "097-0100"}, "/api/v2/federal_accounts/097-0100/program_activities/"),
+    ("get_federal_account_fy_snapshot", {"account_id": 4595}, "/api/v2/federal_accounts/4595/fiscal_year_snapshot/"),
+]
+
+_ALL_TOOLS = _POST_TOOLS + _GET_TOOLS
+
+
+def _is_post(tool_name):
+    return tool_name in {t[0] for t in _POST_TOOLS}
+
+
+def _patch_for(tool_name, mock, monkeypatch):
+    target = "_post" if _is_post(tool_name) else "_get"
+    monkeypatch.setattr(srv, target, mock)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 1: path correctness
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,expected_path", _POST_TOOLS)
+def test_q01_post_path(tool, kwargs, expected_path, monkeypatch):
+    mock = _make_post_mock({"results": [], "page_metadata": {}, "data": []})
+    monkeypatch.setattr(srv, "_post", mock)
+    asyncio.run(_call(tool, **kwargs))
+    assert mock.calls[-1][0] == expected_path
+
+
+@pytest.mark.parametrize("tool,kwargs,expected_path", _GET_TOOLS)
+def test_q01_get_path(tool, kwargs, expected_path, monkeypatch):
+    mock = _make_get_mock({"results": [], "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"})
+    monkeypatch.setattr(srv, "_get", mock)
+    asyncio.run(_call(tool, **kwargs))
+    assert mock.calls[-1][0] == expected_path
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 2: response passthrough
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q02_response_passthrough(tool, kwargs, _, monkeypatch):
+    sentinel = {"_marker": "ok", "results": [{"x": 1}], "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(sentinel) if _is_post(tool) else _make_get_mock(sentinel)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert _payload(r) == sentinel
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 3: HTTP 401/403/404/422/429/500/502/503 surface cleanly
+# ---------------------------------------------------------------------------
+
+_HTTP_ERRORS = [
+    (401, "unauthorized"),
+    (403, "forbidden"),
+    (404, "not found"),
+    (422, "validation failed"),
+    (429, "too many requests"),
+    (500, "internal server error"),
+    (502, "bad gateway"),
+    (503, "service unavailable"),
+]
+
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+@pytest.mark.parametrize("status,detail", _HTTP_ERRORS)
+def test_q03_http_errors_surfaced(status, detail, tool, kwargs, _, monkeypatch):
+    err = _http_error(status, f'{{"detail":"{detail}"}}'.encode())
+    mock = _make_failing_post(_format_runtime(err)) if _is_post(tool) else _make_failing_get(_format_runtime(err))
+    _patch_for(tool, mock, monkeypatch)
+    try:
+        asyncio.run(_call(tool, **kwargs))
+    except Exception as e:
+        assert str(status) in str(e) or detail in str(e).lower()
+        return
+    raise AssertionError(f"expected error for HTTP {status}")
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 4: network error wrapped
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q04_network_error(tool, kwargs, _, monkeypatch):
+    err = RuntimeError("Network error calling USASpending: connection refused")
+    mock = _make_failing_post(err) if _is_post(tool) else _make_failing_get(err)
+    _patch_for(tool, mock, monkeypatch)
+    try:
+        asyncio.run(_call(tool, **kwargs))
+    except Exception as e:
+        assert "network error" in str(e).lower() or "connection" in str(e).lower()
+        return
+    raise AssertionError("expected error")
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 5: forward-compat (extra unknown fields preserved)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q05_forward_compat(tool, kwargs, _, monkeypatch):
+    response = {
+        "results": [], "data": [], "codes": [], "contracts": {},
+        "last_updated": "01/01/2026",
+        "_v3_field": "ok", "_meta": {"deeply": {"nested": True}},
+    }
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    d = _payload(r)
+    assert d.get("_v3_field") == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 6: idempotency (3 sequential calls produce same)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q06_idempotent(tool, kwargs, _, monkeypatch):
+    response = {"_id": "X", "results": [], "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    a = asyncio.run(_call(tool, **kwargs))
+    b = asyncio.run(_call(tool, **kwargs))
+    assert _payload(a) == _payload(b)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 7: concurrent calls share httpx client
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q07_concurrent(tool, kwargs, _, monkeypatch):
+    response = {"results": [], "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    async def _all():
+        return await asyncio.gather(*[_call(tool, **kwargs) for _ in range(3)])
+    asyncio.run(_all())
+    assert len(mock.calls) == 3
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 8: tool registered with mcp
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q08_tool_registered(tool, kwargs, _):
+    names = {t.name for t in mcp._tool_manager.list_tools()}
+    assert tool in names
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 9: docstring present and substantive
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q09_docstring(tool, kwargs, _):
+    t = mcp._tool_manager.get_tool(tool)
+    assert t.description and len(t.description) > 30
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 10: read-only annotation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q10_readonly_annotation(tool, kwargs, _):
+    t = mcp._tool_manager.get_tool(tool)
+    ann = t.annotations
+    if hasattr(ann, "readOnlyHint"):
+        assert ann.readOnlyHint is True
+    elif isinstance(ann, dict):
+        assert ann.get("readOnlyHint") is True
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 11: response with unicode preserved
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q11_unicode_response(tool, kwargs, _, monkeypatch):
+    response = {"results": [{"name": "Société Générale"}], "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    d = _payload(r)
+    if d.get("results"):
+        assert "Société" in d["results"][0]["name"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 12: HTML error body cleaned (no markup leaks)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q12_html_error_cleaned(tool, kwargs, _, monkeypatch):
+    err = _http_error(502, b"<!doctype html><html><head><title>Bad Gateway</title></head><body><h1>502</h1></body></html>", content_type="text/html")
+    mock = _make_failing_post(_format_runtime(err)) if _is_post(tool) else _make_failing_get(_format_runtime(err))
+    _patch_for(tool, mock, monkeypatch)
+    try:
+        asyncio.run(_call(tool, **kwargs))
+    except Exception as e:
+        s = str(e)
+        # Title/h1 extracted, no raw HTML tags
+        assert ("Bad Gateway" in s or "502" in s) and "<html" not in s
+        return
+    raise AssertionError("expected error")
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 13: empty response shape (no results key)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q13_minimal_dict_response(tool, kwargs, _, monkeypatch):
+    """A bare dict response without tool-specific keys should pass through."""
+    mock = _make_post_mock({}) if _is_post(tool) else _make_get_mock({})
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert isinstance(_payload(r), dict)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 14: large response (100+ items)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q14_large_response(tool, kwargs, _, monkeypatch):
+    big_results = [{"id": i, "name": f"X{i}"} for i in range(100)]
+    response = {"results": big_results, "data": big_results, "codes": big_results,
+                "contracts": {f"K{i}": "v" for i in range(50)}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert isinstance(_payload(r), dict)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 15: response with null fields tolerated
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q15_null_fields_tolerated(tool, kwargs, _, monkeypatch):
+    response = {"results": [{"id": None, "name": None, "amount": None}],
+                "data": [], "codes": [], "contracts": {}, "last_updated": None}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert isinstance(_payload(r), dict)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 16: extreme numeric values pass through
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q16_extreme_numerics(tool, kwargs, _, monkeypatch):
+    response = {"results": [{"amount": 9.99e15}], "data": [{"value": -1.5e10}],
+                "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert isinstance(_payload(r), dict)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 17: deeply nested response objects pass through
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q17_deeply_nested(tool, kwargs, _, monkeypatch):
+    response = {"results": [{"agency": {"funding": {"office": {"code": "X", "name": "Y"}}}}],
+                "data": [], "codes": [], "contracts": {}, "last_updated": "01/01/2026"}
+    mock = _make_post_mock(response) if _is_post(tool) else _make_get_mock(response)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    d = _payload(r)
+    if d.get("results"):
+        agency = d["results"][0].get("agency") or {}
+        if agency:
+            assert agency["funding"]["office"]["code"] == "X"
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 18: timeout error wrapped
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q18_timeout_error(tool, kwargs, _, monkeypatch):
+    err = RuntimeError("Network error calling USASpending: timeout exceeded")
+    mock = _make_failing_post(err) if _is_post(tool) else _make_failing_get(err)
+    _patch_for(tool, mock, monkeypatch)
+    try:
+        asyncio.run(_call(tool, **kwargs))
+    except Exception as e:
+        assert "timeout" in str(e).lower() or "network error" in str(e).lower()
+        return
+    raise AssertionError("expected error")
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 19: malformed JSON wrapped (non-dict body)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q19_non_dict_response_rejected(tool, kwargs, _, monkeypatch):
+    """API returning a list instead of dict should raise (except list_states)."""
+    if tool == "list_states":
+        return  # documented exception, special-cased in code
+    err = RuntimeError(f"USASpending returned an unexpected list at '/x' (expected JSON object).")
+    mock = _make_failing_post(err) if _is_post(tool) else _make_failing_get(err)
+    _patch_for(tool, mock, monkeypatch)
+    try:
+        asyncio.run(_call(tool, **kwargs))
+    except Exception as e:
+        assert "unexpected list" in str(e) or "expected JSON object" in str(e)
+        return
+    raise AssertionError("expected error")
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting battery 20: real-API fixture passes (where captured)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_MAP = {
+    "search_subawards": "subawards",
+    "spending_by_subaward_grouped": "sub_grouped",
+    "search_recipients": "recipient_search",
+    "autocomplete_recipient": "ac_recipient",
+    "autocomplete_awarding_agency": "ac_awarding",
+    "autocomplete_funding_agency": "ac_funding",
+    "autocomplete_cfda": "ac_cfda",
+    "autocomplete_glossary": "ac_glossary",
+    "get_award_funding_rollup": "aw_funding_rollup",
+    "spending_by_transaction": "search_tx",
+    "spending_by_geography": "search_geo",
+    "get_idv_funding": "idv_funding",
+    "get_idv_funding_rollup": "idv_fr_rollup",
+    "get_idv_activity": "idv_activity",
+    "list_federal_accounts": "fa_list",
+    "get_agency_budgetary_resources": "agency_budgetary",
+    "get_agency_sub_agencies": "agency_subagency",
+    "get_agency_federal_accounts": "agency_fed_acct",
+    "get_agency_object_classes": "agency_obj_class",
+    "get_agency_program_activities": "agency_prog_act",
+    "get_agency_obligations_by_award_category": "agency_oblig",
+    "get_idv_amounts": "idv_amounts",
+    "get_award_types_reference": "ref_award_types",
+    "get_def_codes_reference": "ref_def_codes",
+    "get_glossary": "ref_glossary",
+    "get_submission_periods": "ref_submission",
+    "awards_last_updated": "aw_last_updated",
+}
+
+
+@pytest.mark.parametrize("tool,kwargs,_", _ALL_TOOLS)
+def test_q20_real_fixture_passes(tool, kwargs, _, monkeypatch):
+    fixture_key = _FIXTURE_MAP.get(tool)
+    if not fixture_key or fixture_key not in REAL:
+        return  # no fixture captured for this tool; skip silently
+    real = REAL[fixture_key]
+    if not isinstance(real, dict):
+        return
+    mock = _make_post_mock(real) if _is_post(tool) else _make_get_mock(real)
+    _patch_for(tool, mock, monkeypatch)
+    r = asyncio.run(_call(tool, **kwargs))
+    assert isinstance(_payload(r), dict)

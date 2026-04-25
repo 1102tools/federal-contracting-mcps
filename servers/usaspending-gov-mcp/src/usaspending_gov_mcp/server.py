@@ -1993,9 +1993,13 @@ async def get_federal_account_detail(account_code: str) -> dict[str, Any]:
 
 @mcp.tool(annotations={"title": "Get Federal Account Object Classes", "readOnlyHint": True, "destructiveHint": False})
 async def get_federal_account_object_classes(account_code: str) -> dict[str, Any]:
-    """Get the object class breakdown of obligations for a federal account."""
+    """Get the object class breakdown of obligations for a federal account.
+
+    Note: this endpoint requires POST (not GET like the other federal account
+    sub-endpoints). Live audit caught this; the body is empty.
+    """
     account_code = _validate_tas(account_code)
-    return await _get(f"/api/v2/federal_accounts/{account_code}/object_classes/total/")
+    return await _post(f"/api/v2/federal_accounts/{account_code}/object_classes/total/", {})
 
 
 @mcp.tool(annotations={"title": "Get Federal Account Program Activities", "readOnlyHint": True, "destructiveHint": False})
@@ -2016,15 +2020,30 @@ async def get_federal_account_program_activities(
 
 @mcp.tool(annotations={"title": "Get Federal Account Fiscal Year Snapshot", "readOnlyHint": True, "destructiveHint": False})
 async def get_federal_account_fy_snapshot(
-    account_code: str,
+    account_id: int | str,
     fiscal_year: int | str | None = None,
 ) -> dict[str, Any]:
-    """Get a single-fiscal-year snapshot of a federal account's resources."""
-    account_code = _validate_tas(account_code)
+    """Get a single-fiscal-year snapshot of a federal account's resources.
+
+    Important: this endpoint takes the numeric `account_id` (e.g. 4595), NOT
+    the alphanumeric `account_number` (e.g. "027-5183") used by the other
+    federal-account endpoints. The list_federal_accounts response includes
+    both fields per record. Pass the integer account_id here.
+    """
+    aid = str(account_id).strip()
+    if not aid:
+        raise ValueError("account_id cannot be empty.")
+    if not aid.lstrip("-").isdigit():
+        raise ValueError(
+            f"account_id={account_id!r} must be a numeric integer ID (e.g. 4595). "
+            f"This endpoint differs from get_federal_account_detail which takes "
+            f"the alphanumeric account_number. Pull both fields from "
+            f"list_federal_accounts and pass the right one to each tool."
+        )
     fy = _validate_fy(fiscal_year)
     if fy:
-        return await _get(f"/api/v2/federal_accounts/{account_code}/fiscal_year_snapshot/{fy}/")
-    return await _get(f"/api/v2/federal_accounts/{account_code}/fiscal_year_snapshot/")
+        return await _get(f"/api/v2/federal_accounts/{aid}/fiscal_year_snapshot/{fy}/")
+    return await _get(f"/api/v2/federal_accounts/{aid}/fiscal_year_snapshot/")
 
 
 # ---------------------------------------------------------------------------
