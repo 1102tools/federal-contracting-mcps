@@ -1,14 +1,14 @@
 # sam-gov-mcp
 
-MCP server for SAM.gov entity registration, exclusion/debarment, contract opportunity, and contract award data.
+MCP server for SAM.gov entity registration, exclusion/debarment, contract opportunity, contract award, federal hierarchy, and FFATA subaward data.
 
 Requires a free SAM.gov API key. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
 
-*Tested and hardened through four audit rounds plus a live audit with a real SAM.gov key. 816 regression tests covering 3 P1 live-audit silent-wrong-data bugs, 5 P1 response-shape crashes, and multiple P2 validation gaps fixed. Birthplace of the `extra='forbid'` cross-fix applied to all 8 MCPs in the suite. See [TESTING.md](TESTING.md) for the full testing record.*
+*Tested and hardened through eight audit rounds plus live audits with a real SAM.gov key. 1,094 regression tests. v0.4 added 278 tests for Federal Hierarchy + FFATA Subaward endpoints (123 live), catching three silently-ignored Subaward API parameter casings during live audit. Birthplace of the `extra='forbid'` cross-fix applied to all 8 MCPs in the suite. See [testing.md](testing.md) for the full testing record.*
 
 ## What it does
 
-Exposes four SAM.gov REST APIs plus the PSC lookup as 15 MCP tools:
+Exposes seven SAM.gov REST APIs as 19 MCP tools:
 
 **Entity Management (v3)**
 - `lookup_entity_by_uei` - Single UEI lookup with configurable response sections
@@ -29,6 +29,16 @@ Exposes four SAM.gov REST APIs plus the PSC lookup as 15 MCP tools:
 - `search_contract_awards` - Search contract award records (vendor, agency, NAICS, dates, dollars, set-aside, etc.)
 - `lookup_award_by_piid` - Look up all modifications for a single PIID
 - `search_deleted_awards` - Search deleted award records for audit trails
+
+**Federal Hierarchy (v1)**
+- `search_federal_organizations` - Search the FH for departments, agencies, sub-agencies, offices (filter by FH org id, name, type, status, agency code, CGAC)
+- `get_organization_hierarchy` - Walk the children of a federal organization
+
+**Acquisition Subaward Reporting (FFATA subcontracts)**
+- `search_acquisition_subawards` - Search FFATA subcontract reports (prime/sub relationships, agency, dates, status)
+
+**Assistance Subaward Reporting (FFATA grant subawards)**
+- `search_assistance_subawards` - Search FFATA grant subaward reports (FAIN, prime award key, agency, dates)
 
 **PSC Lookup**
 - `lookup_psc_code` - Resolve a PSC code to its full record
@@ -109,6 +119,11 @@ Once configured:
 - "Look up all modifications for PIID W912BV22P0112."
 - "Find all SDVOSB set-aside contract awards signed this year with NAICS 541512."
 - "Show me deleted contract award records for Department of Defense."
+- "Find the Federal Hierarchy ID for the Department of the Treasury and walk one level of children."
+- "What sub-tier organizations roll up under DoD (FH org id 100000000)?"
+- "Show me FFATA subcontracts on prime PIID W912QR25C0022."
+- "Pull all subawards reported under grant FAIN FA86502125028."
+- "List the agency-level orgs in CGAC 075 (HHS)."
 
 ## Design notes
 
@@ -125,6 +140,14 @@ Once configured:
 - **Contract Awards response normalization.** The Contract Awards API returns different JSON wrapper shapes for populated vs. empty results. All tools normalize this to a consistent `{"awardSummary": [...], "totalRecords": int}` shape. Error responses are plain text (not JSON), detected and raised as actionable errors.
 - **Contract Awards pagination.** Uses `limit`/`offset` (NOT `page`/`size` like Entity Management). Max limit is 100. Dates must be MM/dd/yyyy format with bracket ranges `[MM/dd/yyyy,MM/dd/yyyy]`.
 - **Composite workflow.** `vendor_responsibility_check` collapses a typical FAR 9.104-1 check (entity registration + exclusion lookup) into one tool call, returning a structured flags list for downstream reasoning.
+- **Federal Hierarchy quirks baked in.**
+  - Lowercase `totalrecords` and `orglist` keys (rest of SAM.gov uses camelCase); normalizer preserves both
+  - Default response is ACTIVE-only; passing `status=ACTIVE` is a no-op vs. the unfiltered call. Pass `INACTIVE` to expand to retired orgs
+  - Real `fhorgtype` values look like `Department/Ind. Agency`, but the API also accepts shorthand (DEPARTMENT, AGENCY) with case-insensitive matching
+- **Subaward Reporting quirks baked in.**
+  - Dates use ISO `yyyy-MM-dd` (NOT `MM/dd/yyyy` like Contract Awards). Mixing them raises a clear pre-network validation error
+  - Pagination uses `pageNumber`/`pageSize` (NOT `page`/`size` or `limit`/`offset`)
+  - Live audit (April 2026) found three documented parameter casings are silently ignored: `PIID` is dropped (use lowercase `piid`), `referencedIdvPIID` is dropped (use `referencedIDVPIID`), and `referencedIDVAgencyID` is dropped (use `referencedIDVAgencyId`). Wire-level names are now correct in the server
 
 ## Part of
 

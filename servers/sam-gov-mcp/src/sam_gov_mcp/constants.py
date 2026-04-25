@@ -9,15 +9,21 @@ OPPORTUNITIES_PATH = "/opportunities/v2/search"
 OPPORTUNITY_DESC_PATH = "/prod/opportunities/v1/noticedesc"
 PSC_PATH = "/prod/locationservices/v1/api/publicpscdetails"
 CONTRACT_AWARDS_PATH = "/contract-awards/v1/search"
+FH_ORGS_PATH = "/prod/federalorganizations/v1/orgs"
+FH_HIERARCHY_PATH = "/prod/federalorganizations/v1/org/hierarchy"
+SUBCONTRACTS_PATH = "/prod/contract/v1/subcontracts/search"
+ASSISTANCE_SUBAWARDS_PATH = "/prod/assistance/v1/subawards/search"
 
 DEFAULT_TIMEOUT = 30.0
-USER_AGENT = "sam-gov-mcp/0.3.7"
+USER_AGENT = "sam-gov-mcp/0.4.0"
 
 # Hard caps from the SAM.gov API (enforce client-side to give good errors)
 ENTITY_MAX_SIZE = 10          # Entity Management has a hard cap of 10
 OPPORTUNITY_MAX_LIMIT = 1000  # Opportunities accepts large limits
 EXCLUSION_MAX_SIZE = 100      # Exclusions typical cap
 CONTRACT_AWARDS_MAX_LIMIT = 100  # Contract Awards hard cap
+FH_MAX_LIMIT = 100            # Federal Hierarchy /orgs cap
+SUBAWARD_MAX_PAGE_SIZE = 1000 # Subaward APIs allow up to 1000/page
 
 # Notice type codes (ptype parameter on Opportunities)
 NOTICE_TYPES: dict[str, str] = {

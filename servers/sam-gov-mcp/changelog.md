@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.4.0
+
+Added Federal Hierarchy and FFATA Subaward Reporting endpoints. Tool count
+goes from 15 to 19. 278 new regression tests (155 offline, 123 live). All
+4 new endpoints have 25+ live tests each.
+
+### New tools
+
+- `search_federal_organizations` - Search the SAM.gov Federal Hierarchy by
+  org id, name, type, status, agency code, or CGAC. Useful for normalizing
+  agency names to canonical FH IDs before passing them to Contract Awards,
+  Opportunities, or Subaward searches.
+- `get_organization_hierarchy` - Walk the immediate children of a federal
+  organization. Combine with the search tool to traverse the full agency
+  tree.
+- `search_acquisition_subawards` - Search FFATA subcontract reports
+  (acquisition subawards). Maps prime contractors to their subs and surfaces
+  the full distribution of a federal procurement dollar.
+- `search_assistance_subawards` - Search FFATA grant subaward reports.
+  Traces federal grant funds from prime recipient to subrecipients.
+
+### P1 bugs found in live audit (would have shipped silent-wrong-data)
+
+Three Subaward API parameters whose documented casings are silently ignored
+by the production SAM.gov API. The ignored variants return the unfiltered
+~2.7M-record universe regardless of the value passed. Caught by regression
+tests that compare filtered vs. baseline `totalRecords` and assert the
+filtered count is strictly smaller. Without live audit, every PIID-,
+referenced-IDV-, or referenced-IDV-agency-scoped subaward query would have
+silently returned every subaward in the system.
+
+| Tool param | Documented casing (broken) | Working casing |
+|---|---|---|
+| `piid` | `PIID` | `piid` |
+| `referenced_idv_piid` | `referencedIdvPIID` | `referencedIDVPIID` |
+| `referenced_idv_agency_id` | `referencedIDVAgencyID` | `referencedIDVAgencyId` |
+
+### P2 fixes
+
+- `fh_org_type` whitelist removed. Initial implementation restricted to enum
+  values like `DEPARTMENT`, but the live API returns values like
+  `Department/Ind. Agency`. Whitelist was rejecting real values that users
+  would copy-paste from response records. Now WAF-safe + length-clamp only.
+- `status=ACTIVE` on Federal Hierarchy is a no-op. API defaults to
+  ACTIVE-only when no filter is sent. Docstring updated.
+- `USER_AGENT` bumped to 0.4.0 (was stale at 0.3.7).
+
+### API surface notes baked in
+
+- Federal Hierarchy uses lowercase `totalrecords` / `orglist` (rest of
+  SAM.gov uses camelCase). Normalizer preserves both keys.
+- Subaward APIs use ISO `yyyy-MM-dd` dates (rest of SAM.gov uses
+  MM/dd/yyyy). New `_validate_date_yyyy_mm_dd` validator enforces this
+  with a clear error message that explains the divergence.
+- Subaward APIs use `pageNumber`/`pageSize` for pagination (rest of SAM.gov
+  uses `limit`/`offset` or `page`/`size`).
+- Subaward Acquisition API rejects PIIDs containing hyphens server-side
+  ("Piid must be alphanumeric"). Older FSS-style PIIDs like `GS-35F-0119Y`
+  return HTTP 400. We surface the API error verbatim rather than
+  pre-restricting at the validator.
+
+### Wage Determinations
+
+A spike on adding wage determinations (SCA/DBA) concluded: not viable as
+part of `sam-gov-mcp`. No documented public REST API exists at
+`api.sam.gov`, no entry on `open.gsa.gov`, and DOL retired WDOL.gov in 2019.
+The only working endpoint is the website's internal search
+(`https://sam.gov/api/prod/sgs/v1/search/?index=wd`), which is anonymous,
+undocumented, and returns metadata only (the actual rate tables live in
+PDFs behind the UI). If wage-determination support is added later it will
+be a separate, experimental module with isolated client and metadata-only
+scope.
+
 ## 0.3.7
 
 Round 7: offline property test suite using Hypothesis-driven property-based

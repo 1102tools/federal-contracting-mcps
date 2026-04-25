@@ -30,6 +30,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from .constants import (
+    ASSISTANCE_SUBAWARDS_PATH,
     BASE_URL,
     CONTRACT_AWARDS_MAX_LIMIT,
     CONTRACT_AWARDS_PATH,
@@ -38,10 +39,15 @@ from .constants import (
     ENTITY_PATH,
     EXCLUSION_MAX_SIZE,
     EXCLUSIONS_PATH,
+    FH_HIERARCHY_PATH,
+    FH_MAX_LIMIT,
+    FH_ORGS_PATH,
     OPPORTUNITIES_PATH,
     OPPORTUNITY_DESC_PATH,
     OPPORTUNITY_MAX_LIMIT,
     PSC_PATH,
+    SUBAWARD_MAX_PAGE_SIZE,
+    SUBCONTRACTS_PATH,
     USER_AGENT,
 )
 
@@ -54,6 +60,7 @@ mcp = FastMCP("sam-gov")
 
 _MMDDYYYY_RE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 _MMDDYYYY_RANGE_RE = re.compile(r"^\[\d{2}/\d{2}/\d{4},\d{2}/\d{2}/\d{4}\]$")
+_YYYY_MM_DD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _UEI_RE = re.compile(r"^[A-Z0-9]{12}$")
 _CAGE_RE = re.compile(r"^[A-Z0-9]{5}$")
 
@@ -91,6 +98,24 @@ def _validate_date_mmddyyyy(value: str | None, *, field: str) -> str | None:
         )
     try:
         mm, dd, yyyy = value.split("/")
+        date(int(yyyy), int(mm), int(dd))
+    except ValueError as exc:
+        raise ValueError(f"{field}={value!r} is not a valid calendar date: {exc}") from exc
+    return value
+
+
+def _validate_date_yyyy_mm_dd(value: str | None, *, field: str) -> str | None:
+    """Subaward APIs use ISO yyyy-MM-dd, unlike the rest of SAM.gov (MM/dd/yyyy)."""
+    if value is None:
+        return None
+    if not _YYYY_MM_DD_RE.match(value):
+        raise ValueError(
+            f"{field} must be yyyy-MM-dd (e.g. '2026-01-15'). Got {value!r}. "
+            f"Note: Subaward APIs use ISO format, unlike Contract Awards/Opportunities "
+            f"which use MM/DD/YYYY."
+        )
+    try:
+        yyyy, mm, dd = value.split("-")
         date(int(yyyy), int(mm), int(dd))
     except ValueError as exc:
         raise ValueError(f"{field}={value!r} is not a valid calendar date: {exc}") from exc
@@ -1542,6 +1567,326 @@ async def vendor_responsibility_check(uei: str) -> dict[str, Any]:
                 result["flags"].append("ACTIVE_EXCLUSION_FOUND")
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Federal Hierarchy tools
+# ---------------------------------------------------------------------------
+
+def _normalize_fh_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Federal Hierarchy uses lowercase 'totalrecords' and 'orglist' (different from
+    the rest of SAM.gov which uses camelCase). Normalize so callers can rely on
+    consistent keys, but preserve the originals too.
+    """
+    if not isinstance(data, dict):
+        return {"totalrecords": 0, "orglist": [], "_note": "Unexpected response shape."}
+    if "totalrecords" in data:
+        data["totalrecords"] = _safe_int(data["totalrecords"], default=0)
+    if "orglist" in data:
+        data["orglist"] = _as_list(data["orglist"])
+    return data
+
+
+@mcp.tool(annotations={"title": "Search Federal Organizations", "readOnlyHint": True, "destructiveHint": False})
+async def search_federal_organizations(
+    fh_org_id: Union[str, int, None] = None,
+    fh_org_name: str | None = None,
+    fh_org_type: str | None = None,
+    status: Literal["ACTIVE", "INACTIVE", "MERGED"] | None = None,
+    agency_code: Union[str, int, None] = None,
+    cgac: Union[str, int, None] = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Search the SAM.gov Federal Hierarchy.
+
+    Returns federal organizations (departments, agencies, sub-agencies, offices)
+    with their FH IDs, codes, hierarchical relationships, and status. Useful
+    for normalizing agency names to canonical FH IDs before passing them to
+    Contract Awards, Opportunities, or Subaward searches.
+
+    Filter notes:
+    - fh_org_id: exact lookup by Federal Hierarchy organization ID (numeric).
+    - fh_org_name: partial substring match on the organization name.
+    - fh_org_type: case-insensitive substring filter. Live values from the API
+      look like 'Department/Ind. Agency', but the API also accepts shorthand
+      like 'DEPARTMENT' or 'AGENCY' and matches loosely. Pass whatever the
+      response showed, or one of: department, agency, sub-agency, office,
+      major command, field activity.
+    - status: ACTIVE (default if filter omitted), INACTIVE (retired), or
+      MERGED. Live audit (April 2026): the API defaults to ACTIVE-only when
+      no filter is sent, so passing status='ACTIVE' is a no-op vs. the
+      unfiltered call. Pass 'INACTIVE' to expand the search to retired orgs.
+    - agency_code: legacy agency code if known.
+    - cgac: Common Government-wide Accounting Classification (Treasury) code.
+
+    Pagination uses limit (1-100) / offset (0-based). The Federal Hierarchy
+    API uses lowercase 'totalrecords' and 'orglist' in responses (unlike the
+    camelCase used elsewhere in SAM.gov); the normalizer preserves both keys.
+    """
+    limit = _clamp(limit, field="limit", lo=1, hi=FH_MAX_LIMIT)
+    if offset < 0:
+        raise ValueError(f"offset must be >= 0. Got {offset}.")
+    fh_org_id = _coerce_str(fh_org_id, field="fh_org_id")
+    agency_code = _coerce_str(agency_code, field="agency_code")
+    cgac = _coerce_str(cgac, field="cgac")
+    fh_org_name = _clamp_str_len(
+        _validate_waf_safe(fh_org_name, field="fh_org_name"),
+        field="fh_org_name", maximum=200,
+    )
+    fh_org_type = _clamp_str_len(
+        _validate_waf_safe(fh_org_type, field="fh_org_type"),
+        field="fh_org_type", maximum=100,
+    )
+
+    params: dict[str, Any] = {
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    if fh_org_id:
+        params["fhorgid"] = fh_org_id
+    if fh_org_name:
+        params["fhorgname"] = fh_org_name
+    if fh_org_type:
+        params["fhorgtype"] = fh_org_type
+    if status:
+        params["status"] = status
+    if agency_code:
+        params["agencycode"] = agency_code
+    if cgac:
+        params["cgac"] = cgac
+
+    result = await _get(FH_ORGS_PATH, params)
+    return _normalize_fh_response(result)
+
+
+@mcp.tool(annotations={"title": "Get Organization Hierarchy", "readOnlyHint": True, "destructiveHint": False})
+async def get_organization_hierarchy(
+    fh_org_id: Union[str, int],
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Get the immediate child organizations of a federal organization.
+
+    Pass an FH org ID (use search_federal_organizations to find one) and
+    receive the list of its direct subordinates. To traverse the full tree,
+    call recursively on each child.
+
+    Pagination uses limit (1-100) / offset.
+    """
+    limit = _clamp(limit, field="limit", lo=1, hi=FH_MAX_LIMIT)
+    if offset < 0:
+        raise ValueError(f"offset must be >= 0. Got {offset}.")
+    org_id = _coerce_str(fh_org_id, field="fh_org_id")
+    if not org_id:
+        raise ValueError(
+            "fh_org_id cannot be empty. Use search_federal_organizations to "
+            "find an org ID first."
+        )
+
+    params: dict[str, Any] = {
+        "fhorgid": org_id,
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    result = await _get(FH_HIERARCHY_PATH, params)
+    return _normalize_fh_response(result)
+
+
+# ---------------------------------------------------------------------------
+# Subaward Reporting tools (FFATA)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_subaward_response(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize subaward responses. Both Acquisition and Assistance APIs use:
+      {totalPages, totalRecords, pageNumber, nextPageLink, previousPageLink, data}
+    But the wrapper can be missing fields when there are zero records, and 'data'
+    can occasionally come back as a single dict instead of a list.
+    """
+    if not isinstance(data, dict):
+        return {"totalRecords": 0, "data": [], "_note": "Unexpected response shape."}
+    if "totalRecords" in data:
+        data["totalRecords"] = _safe_int(data["totalRecords"], default=0)
+    if "totalPages" in data:
+        data["totalPages"] = _safe_int(data["totalPages"], default=0)
+    if "pageNumber" in data:
+        data["pageNumber"] = _safe_int(data["pageNumber"], default=0)
+    if "data" in data:
+        data["data"] = _as_list(data["data"])
+    elif "totalRecords" in data:
+        # API returned counts but no data array
+        data["data"] = []
+    else:
+        data["totalRecords"] = 0
+        data["data"] = []
+        data["_note"] = "Empty or unrecognized response shape from upstream."
+    return data
+
+
+@mcp.tool(annotations={"title": "Search Acquisition Subawards", "readOnlyHint": True, "destructiveHint": False})
+async def search_acquisition_subawards(
+    prime_contract_key: str | None = None,
+    piid: str | None = None,
+    referenced_idv_piid: str | None = None,
+    referenced_idv_agency_id: Union[str, int, None] = None,
+    agency_id: Union[str, int, None] = None,
+    prime_award_type: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    status: Literal["Published", "Deleted"] = "Published",
+    page_number: int = 0,
+    page_size: int = 100,
+) -> dict[str, Any]:
+    """Search FFATA subcontract reports (acquisition subawards).
+
+    These are subcontracts reported by prime contractors under the Federal
+    Funding Accountability and Transparency Act. Use this to map prime
+    contractors to their subs, see subcontract values, and identify the
+    full distribution of a federal procurement dollar.
+
+    CRITICAL: dates use ISO yyyy-MM-dd format (NOT MM/dd/yyyy like the rest
+    of SAM.gov). Pagination uses pageNumber/pageSize (NOT limit/offset).
+
+    Key filters:
+    - prime_contract_key: business key for subawards under a prime
+    - piid: Procurement Instrument ID of the prime contract (returns all subs)
+    - referenced_idv_piid: prime contract family identifier (parent IDV)
+    - referenced_idv_agency_id: agency on the parent IDV
+    - agency_id: numeric agency identifier on the prime
+    - prime_award_type: type of the parent prime award
+    - from_date / to_date: yyyy-MM-dd window (filters on subaward report date)
+    - status: 'Published' (default) or 'Deleted' for audit trails
+    - page_number: 0-based page index
+    - page_size: 1-1000, default 100
+
+    Response: {totalPages, totalRecords, pageNumber, nextPageLink,
+    previousPageLink, data: [...]}.
+    """
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=SUBAWARD_MAX_PAGE_SIZE)
+    if page_number < 0:
+        raise ValueError(f"page_number must be >= 0. Got {page_number}.")
+    referenced_idv_agency_id = _coerce_str(
+        referenced_idv_agency_id, field="referenced_idv_agency_id"
+    )
+    agency_id = _coerce_str(agency_id, field="agency_id")
+    from_date = _validate_date_yyyy_mm_dd(from_date, field="from_date")
+    to_date = _validate_date_yyyy_mm_dd(to_date, field="to_date")
+    prime_contract_key = _clamp_str_len(
+        _validate_waf_safe(prime_contract_key, field="prime_contract_key"),
+        field="prime_contract_key", maximum=100,
+    )
+    piid = _clamp_str_len(
+        _validate_waf_safe(piid, field="piid"),
+        field="piid", maximum=100,
+    )
+    referenced_idv_piid = _clamp_str_len(
+        _validate_waf_safe(referenced_idv_piid, field="referenced_idv_piid"),
+        field="referenced_idv_piid", maximum=100,
+    )
+    prime_award_type = _clamp_str_len(
+        _validate_waf_safe(prime_award_type, field="prime_award_type"),
+        field="prime_award_type", maximum=100,
+    )
+
+    params: dict[str, Any] = {
+        "pageNumber": str(page_number),
+        "pageSize": str(page_size),
+        "status": status,
+    }
+    if prime_contract_key:
+        params["primeContractKey"] = prime_contract_key
+    if piid:
+        # Live audit (April 2026): the documented uppercase 'PIID' is silently
+        # ignored by the API and returns the unfiltered total. The lowercase
+        # 'piid' is what actually filters. Same surprise as deptname/subtier
+        # on Opportunities.
+        params["piid"] = piid
+    if referenced_idv_piid:
+        # Documented as 'referencedIdvPIID'; the working casing is
+        # 'referencedIDVPIID' (caps on IDV). The documented form is silently
+        # ignored.
+        params["referencedIDVPIID"] = referenced_idv_piid
+    if referenced_idv_agency_id:
+        # Documented as 'referencedIDVAgencyID'; the working casing is
+        # 'referencedIDVAgencyId' (lowercase d at the end). Documented form
+        # is silently ignored.
+        params["referencedIDVAgencyId"] = referenced_idv_agency_id
+    if agency_id:
+        params["agencyId"] = agency_id
+    if prime_award_type:
+        params["primeAwardType"] = prime_award_type
+    if from_date:
+        params["fromDate"] = from_date
+    if to_date:
+        params["toDate"] = to_date
+
+    result = await _get(SUBCONTRACTS_PATH, params)
+    return _normalize_subaward_response(result)
+
+
+@mcp.tool(annotations={"title": "Search Assistance Subawards", "readOnlyHint": True, "destructiveHint": False})
+async def search_assistance_subawards(
+    prime_award_key: str | None = None,
+    fain: str | None = None,
+    agency_code: Union[str, int, None] = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    status: Literal["Published", "Deleted"] = "Published",
+    page_number: int = 0,
+    page_size: int = 100,
+) -> dict[str, Any]:
+    """Search FFATA grant subaward reports (financial assistance subawards).
+
+    These are subawards reported by prime grant recipients on cooperative
+    agreements and grants. Use this to trace federal grant funds from prime
+    recipient down to subrecipients.
+
+    CRITICAL: dates use ISO yyyy-MM-dd format (NOT MM/dd/yyyy). Pagination
+    uses pageNumber/pageSize.
+
+    Key filters:
+    - prime_award_key: business key identifying subawards under a prime grant
+    - fain: Federal Award Identification Number for grants
+    - agency_code: numeric agency identifier on the prime
+    - from_date / to_date: yyyy-MM-dd window
+    - status: 'Published' (default) or 'Deleted'
+    - page_number: 0-based page index
+    - page_size: 1-1000, default 100
+    """
+    page_size = _clamp(page_size, field="page_size", lo=1, hi=SUBAWARD_MAX_PAGE_SIZE)
+    if page_number < 0:
+        raise ValueError(f"page_number must be >= 0. Got {page_number}.")
+    agency_code = _coerce_str(agency_code, field="agency_code")
+    from_date = _validate_date_yyyy_mm_dd(from_date, field="from_date")
+    to_date = _validate_date_yyyy_mm_dd(to_date, field="to_date")
+    prime_award_key = _clamp_str_len(
+        _validate_waf_safe(prime_award_key, field="prime_award_key"),
+        field="prime_award_key", maximum=100,
+    )
+    fain = _clamp_str_len(
+        _validate_waf_safe(fain, field="fain"),
+        field="fain", maximum=100,
+    )
+
+    params: dict[str, Any] = {
+        "pageNumber": str(page_number),
+        "pageSize": str(page_size),
+        "status": status,
+    }
+    if prime_award_key:
+        params["primeAwardKey"] = prime_award_key
+    if fain:
+        params["fain"] = fain
+    if agency_code:
+        params["agencyCode"] = agency_code
+    if from_date:
+        params["fromDate"] = from_date
+    if to_date:
+        params["toDate"] = to_date
+
+    result = await _get(ASSISTANCE_SUBAWARDS_PATH, params)
+    return _normalize_subaward_response(result)
 
 
 # ---------------------------------------------------------------------------

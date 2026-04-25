@@ -2,19 +2,54 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes four SAM.gov REST APIs (Entity Management v3, Exclusions v4, Opportunities v2, Contract Awards v1) plus the PSC lookup as 15 callable tools. It was hardened across six audit rounds. Live audits surfaced four catastrophic P1 silent-wrong-data bugs that could never have been caught with mocks: three from the original 0.3.1 live audit (apostrophe-rejecting WAF, typo'd-parameter silent drops, empty PIID acceptance) and one from the round 6 live audit (search_exclusions sending the wrong API parameter name). This MCP is also where the `extra='forbid'` cross-fix pattern was invented, then back-ported to seven other MCPs in the suite. Round 5 added 369 offline parameterized tests for density expansion. Round 6 added 235 live-gated tests covering every tool against the production SAM.gov API. The MCP ships with 683 regression tests (441 offline plus 242 live-gated), the highest test count in the 1102tools MCP suite at 45.5 tests per tool.
+This Model Context Protocol server exposes seven SAM.gov REST APIs (Entity Management v3, Exclusions v4, Opportunities v2, Contract Awards v1, Federal Hierarchy v1, Acquisition Subaward Reporting, Assistance Subaward Reporting) plus the PSC lookup as 19 callable tools. It was hardened across eight audit rounds. Live audits surfaced seven catastrophic P1 silent-wrong-data bugs that could never have been caught with mocks: three from the original 0.3.1 live audit (apostrophe-rejecting WAF, typo'd-parameter silent drops, empty PIID acceptance), one from the round 6 live audit (search_exclusions sending the wrong API parameter name), and three from the round 8 live audit (Subaward `PIID`/`referencedIdvPIID`/`referencedIDVAgencyID` casings silently ignored — working casings are lowercase `piid`, mixed-case `referencedIDVPIID`, mixed-case `referencedIDVAgencyId`). This MCP is also where the `extra='forbid'` cross-fix pattern was invented, then back-ported to seven other MCPs in the suite. Round 8 added 278 tests for Federal Hierarchy + FFATA Subaward endpoints (123 live, 155 offline including Hypothesis property tests on the new validators and normalizers). The MCP ships with 1,094 regression tests, the highest test count in the 1102tools MCP suite.
 
 | Metric | Value |
 |---|---|
-| MCP tools exposed | 15 |
-| Total regression tests | 816 (574 offline, 242 live-gated) |
-| Tests per tool | 54.4 |
-| Audit rounds completed | 7 (rounds 1-4 + density expansion + live audit + Hypothesis property tests) |
-| Total items addressed | 49 across multiple releases |
-| P1 silent-wrong-data bugs (live-audit-only) | 4 |
+| MCP tools exposed | 19 |
+| Total regression tests | 1,094 (729 offline, 365 live-gated) |
+| Tests per tool | 57.6 |
+| Audit rounds completed | 8 (rounds 1-4 + density expansion + live audit + Hypothesis property tests + v0.4 Federal Hierarchy & FFATA) |
+| Total items addressed | 54 across multiple releases |
+| P1 silent-wrong-data bugs (live-audit-only) | 7 |
 | P3 edge cases (Hypothesis-only) | 2 (inf/nan in _safe_int; empty dict in _normalize_awards_response) |
-| Current release | 0.3.7 |
+| Current release | 0.4.0 |
 | PyPI status | Published as `sam-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
+
+## Round 8 (v0.4.0): Federal Hierarchy and FFATA Subaward Reporting
+
+Added four new tools across three SAM.gov REST APIs that were not previously exposed: Federal Hierarchy (`/orgs`, `/org/hierarchy`), Acquisition Subaward Reporting (`/contract/v1/subcontracts/search`), and Assistance Subaward Reporting (`/assistance/v1/subawards/search`). Added 278 regression tests (155 offline including Hypothesis property tests, 123 live).
+
+### Per-endpoint coverage
+
+| Endpoint | Validation | Mock | Live | Total |
+|---|---|---|---|---|
+| `search_federal_organizations` | 20 | 17 | 35 | 72 |
+| `get_organization_hierarchy` | 10 | 9 | 28 | 47 |
+| `search_acquisition_subawards` | 24 | 17 | 30 | 71 |
+| `search_assistance_subawards` | 17 | 15 | 29 | 61 |
+| Cross-cutting (property tests, normalizer helpers) | 26 | — | — | 26 |
+| **v0.4 totals** | **97** | **58** | **123** | **278** |
+
+### P1 live-audit bugs found and fixed
+
+1. **`PIID` (uppercase) silently ignored.** Documented Subaward parameter name returned the unfiltered total (~2.7M records) regardless of the value passed. Lowercase `piid` is what actually filters. Without live audit, every PIID-scoped subaward query would have silently returned the entire FFATA universe.
+
+2. **`referencedIdvPIID` silently ignored.** Documented param name dropped on the wire. Working casing is `referencedIDVPIID` (caps on IDV).
+
+3. **`referencedIDVAgencyID` silently ignored.** Documented param name dropped on the wire. Working casing is `referencedIDVAgencyId` (lowercase d at the end).
+
+### P2 cosmetic fixes
+
+4. **`fh_org_type` whitelist too strict.** Initial code restricted to enum values `{DEPARTMENT, AGENCY, SUB-AGENCY, MAJOR COMMAND, OFFICE, FIELD ACTIVITY}`, but real API returns values like `Department/Ind. Agency`. Whitelist removed in favor of WAF-safe + length-clamp.
+
+5. **`status=ACTIVE` on Federal Hierarchy is a no-op.** API defaults to ACTIVE-only when no status filter is sent. Documented in tool docstring; `INACTIVE` is the value that actually changes the result set.
+
+### Test design notes
+
+Each of the four new tools has 25+ live tests. Live coverage spans: department-level lookups for Treasury (FH 100013311), DoD (100000000), HHS (100004222), State (100012062), Justice (100011955), Energy (100011980), Agriculture (100006809), Veterans (100006568), Homeland Security (100011942), Interior (100010393), Commerce (100035122); CGAC variants (020/097/075); pagination boundaries (offset 0, 50, beyond total); response shape validation (top-level keys, record-level required keys, ISO date format on returned dates, numeric subAwardAmount strings); concurrent calls (5 parallel `asyncio.gather`); regression tests that fail loudly if a working parameter casing reverts (`piid` returns fewer records than baseline; `fain` returns fewer records than baseline; `INACTIVE` status diverges from default). The `live_acq_subaward_real_piid_returns_subs` test pulls a real PIID from a baseline query, then re-queries with that PIID and asserts every returned record has matching piid.
+
+The Hypothesis property tests (300 examples each) target `_validate_date_yyyy_mm_dd`, `_normalize_fh_response`, and `_normalize_subaward_response` to ensure no input — arbitrary text, dicts, lists, infinity, mixed types — crashes them with anything other than `ValueError`.
 
 ## What Was Tested
 

@@ -9,7 +9,7 @@ No Terminal. No `uv` install. No JSON config editing. Double-click a `.mcpb` fil
 All source lives under `servers/<name>/`. Each server is self-contained: manifest, code, tests, per-server README.
 
 **Procurement data**
-- [sam-gov-mcp](servers/sam-gov-mcp) — SAM.gov entity registration, exclusions, opportunities, contract awards (FPDS replacement)
+- [sam-gov-mcp](servers/sam-gov-mcp) — SAM.gov entity registration, exclusions, opportunities, contract awards (FPDS replacement), federal hierarchy, FFATA subawards
 - [usaspending-gov-mcp](servers/usaspending-gov-mcp) — federal contract and award data, PIIDs, vendor history, agency spending
 - [gsa-calc-mcp](servers/gsa-calc-mcp) — GSA CALC+ awarded NTE hourly rates from MAS contracts (230K+ records)
 - [bls-oews-mcp](servers/bls-oews-mcp) — BLS OEWS market wage data across ~830 occupations and 530+ metros
