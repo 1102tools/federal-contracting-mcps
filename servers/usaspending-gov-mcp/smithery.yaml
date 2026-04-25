@@ -8,5 +8,5 @@ startCommand:
   commandFunction: |
     (config) => ({
       command: 'uvx',
-      args: ['usaspending-mcp']
+      args: ['--from', 'usaspending-gov-mcp', 'usaspending-mcp']
     })
