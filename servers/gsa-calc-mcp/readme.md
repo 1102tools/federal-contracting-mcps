@@ -1,5 +1,7 @@
 # gsa-calc-mcp
 
+<!-- mcp-name: io.github.1102tools/gsa-calc-mcp -->
+
 MCP server for the GSA CALC+ Labor Ceiling Rates API. Query awarded GSA MAS schedule hourly rates for IGCE development, price reasonableness analysis, and market research.
 
 No authentication required. Works with any MCP-compatible client.

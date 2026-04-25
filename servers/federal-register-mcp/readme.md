@@ -1,5 +1,7 @@
 # federal-register-mcp
 
+<!-- mcp-name: io.github.1102tools/federal-register-mcp -->
+
 MCP server for the Federal Register API. Proposed rules, final rules, notices, executive orders, comment periods, and regulatory tracking since 1994.
 
 No authentication required.

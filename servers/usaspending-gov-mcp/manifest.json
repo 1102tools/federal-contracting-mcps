@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "usaspending-gov-mcp",
   "display_name": "USASpending.gov",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "MCP server for USASpending.gov federal contract, award, subaward, recipient, agency, and federal account data.",
   "long_description": "Queries the USASpending.gov API for federal contract and award data across all agencies. v0.3 expands the surface from 17 to 55 tools, adding FFATA subawards, recipient profile/children, agency depth (sub-agencies, federal accounts, object classes, program activities, obligations by award category), award detail rollups, transaction-level and geographic search, IDV depth, autocomplete helpers (awarding/funding agency, CFDA, glossary, recipient), reference data (award types, DEFC, glossary, submission periods), and Treasury federal accounts.\n\n55 tools. No authentication required.\n\nHardened across 9 audit rounds. v0.3 added 243 tests for the new endpoints (167 offline, 76 live). All new endpoints have 10+ live tests against the production API. Origin repo for the `extra='forbid'` pydantic pattern that protects every 1102tools MCP from typo'd parameter name silent-wrong-data bugs.",
   "author": {
@@ -40,7 +40,11 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }

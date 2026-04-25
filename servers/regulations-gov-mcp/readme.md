@@ -1,5 +1,7 @@
 # regulationsgov-mcp
 
+<!-- mcp-name: io.github.1102tools/regulations-gov-mcp -->
+
 MCP server for the Regulations.gov API. Federal rulemaking dockets, proposed rules, final rules, public comments, and comment period tracking.
 
 Optional free API key for higher rate limits.

@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "federal-register-mcp",
   "display_name": "Federal Register",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "MCP server for the Federal Register. Proposed rules, final rules, notices, executive orders, FAR cases, and regulatory tracking.",
   "long_description": "Queries the Federal Register API for published proposed rules, final rules, notices, and executive orders since 1994. Includes comment period tracking, FAR case history, and full-text search across agency documents.\n\n8 tools. No authentication required.\n\nHardened across 5 audit rounds with 182 regression tests (22.8 per tool). 32 items addressed including 2 P2 None-handling bugs surfaced in round 5 Hypothesis property tests (_validate_doc_number(None) raised AttributeError; _clean_error_body(None) raised TypeError). Round 5 added Hypothesis-driven property tests (~25,000 random probes) plus 100+ live tests across 30 federal agencies, all 4 doc types, 28 search terms, and concurrent calls.",
   "author": {
@@ -41,7 +41,11 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }

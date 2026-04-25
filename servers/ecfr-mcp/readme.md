@@ -1,5 +1,7 @@
 # ecfr-mcp
 
+<!-- mcp-name: io.github.1102tools/ecfr-mcp -->
+
 MCP server for the eCFR (Electronic Code of Federal Regulations) API. Read FAR, DFARS, and all agency FAR supplement text with no authentication required.
 
 Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).

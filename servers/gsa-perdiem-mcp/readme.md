@@ -1,5 +1,7 @@
 # gsa-perdiem-mcp
 
+<!-- mcp-name: io.github.1102tools/gsa-perdiem-mcp -->
+
 MCP server for the GSA Per Diem Rates API. Federal travel lodging and M&IE rates for IGCEs and travel cost estimation.
 
 Works without configuration using DEMO_KEY. Optional free API key for higher rate limits.

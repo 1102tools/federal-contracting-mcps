@@ -1,5 +1,7 @@
 # usaspending-gov-mcp
 
+<!-- mcp-name: io.github.1102tools/usaspending-gov-mcp -->
+
 MCP server for the USASpending.gov federal contract, award, subaward, recipient, agency, and federal account API.
 
 No API key required. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).

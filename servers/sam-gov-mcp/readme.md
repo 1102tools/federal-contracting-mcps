@@ -1,5 +1,7 @@
 # sam-gov-mcp
 
+<!-- mcp-name: io.github.1102tools/sam-gov-mcp -->
+
 MCP server for SAM.gov entity registration, exclusion/debarment, contract opportunity, contract award, federal hierarchy, and FFATA subaward data.
 
 Requires a free SAM.gov API key. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
