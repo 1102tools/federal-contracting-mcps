@@ -1183,6 +1183,850 @@ async def get_state_profile(state_fips: str) -> dict[str, Any]:
     return await _get(f"/api/v2/recipient/state/{state_fips.strip()}/")
 
 
+# ===========================================================================
+# v0.3 expansion: subawards, recipient depth, agency depth, award depth,
+# transaction/geography/timeline search, IDV depth, autocomplete helpers,
+# reference data, federal accounts.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Subawards (FFATA)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"title": "Search Subawards", "readOnlyHint": True, "destructiveHint": False})
+async def search_subawards(
+    award_id: str | None = None,
+    sort: Literal["amount", "action_date", "subaward_number", "recipient_name", "description"] = "amount",
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """Search FFATA subaward reports on USASpending.
+
+    Returns the FFATA subaward records (subcontracts under prime contracts and
+    subawards under prime grants). Complementary to the SAM.gov FFATA endpoints
+    but expressed at the USASpending data model.
+
+    award_id: optional generated_internal_id (CONT_AWD_..., ASST_NON_..., etc.)
+    to scope subawards to a single prime award. If omitted, returns subawards
+    across all primes for the page.
+
+    Pagination uses page (1-indexed) and limit (1-100).
+    """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    payload: dict[str, Any] = {
+        "sort": sort,
+        "order": order,
+        "limit": limit,
+        "page": page,
+    }
+    if award_id is not None:
+        award_id = _validate_no_control_chars(award_id, field="award_id")
+        if not award_id.strip():
+            raise ValueError("award_id cannot be empty whitespace; omit instead.")
+        payload["award_id"] = award_id.strip()
+    return await _post("/api/v2/subawards/", payload)
+
+
+@mcp.tool(annotations={"title": "Spending by Subaward Grouped", "readOnlyHint": True, "destructiveHint": False})
+async def spending_by_subaward_grouped(
+    time_period_start: str | None = None,
+    time_period_end: str | None = None,
+    award_type_codes: list[str] | None = None,
+    awarding_agency: str | None = None,
+    funding_agency: str | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
+    def_codes: list[str | int] | None = None,
+    sort: str | None = None,
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """Search subawards using the standard filters object (grouped result set).
+
+    Unlike search_subawards which is scoped to a single prime, this returns
+    subawards grouped under their primes given a filter set similar to
+    search_awards. Useful for FFATA-wide analysis ("show me all DoD
+    subcontracts on cyber awards in FY2026").
+    """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    filters = _build_filters(
+        award_type_codes=award_type_codes,
+        awarding_agency=awarding_agency,
+        funding_agency=funding_agency,
+        naics_codes=naics_codes,
+        psc_codes=psc_codes,
+        set_aside_type_codes=set_aside_type_codes,
+        time_period_start=time_period_start,
+        time_period_end=time_period_end,
+        def_codes=def_codes,
+    )
+    payload: dict[str, Any] = {
+        "filters": filters,
+        "limit": limit,
+        "page": page,
+        "order": order,
+    }
+    if sort:
+        payload["sort"] = sort
+    return await _post("/api/v2/search/spending_by_subaward_grouped/", payload)
+
+
+# ---------------------------------------------------------------------------
+# Recipient depth
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"title": "Search Recipients", "readOnlyHint": True, "destructiveHint": False})
+async def search_recipients(
+    keyword: str | None = None,
+    award_type: Literal["all", "contracts", "grants", "loans", "direct_payments", "other"] = "all",
+    sort: Literal["amount", "name", "duns", "uei"] = "amount",
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """Search USASpending recipients (vendors and grantees) by keyword.
+
+    Returns paginated recipients with their UEI, DUNS, name, and a recipient
+    'id' that downstream tools use as the hash for get_recipient_profile and
+    get_recipient_children.
+
+    keyword can match recipient name, UEI, or DUNS. If omitted, returns the
+    top recipients ranked by `sort`.
+    """
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    keyword = _validate_no_control_chars(keyword, field="keyword")
+    payload: dict[str, Any] = {
+        "limit": limit,
+        "page": page,
+        "order": order,
+        "sort": sort,
+        "award_type": award_type,
+    }
+    if keyword and keyword.strip():
+        payload["keyword"] = keyword.strip()
+    return await _post("/api/v2/recipient/", payload)
+
+
+_RECIPIENT_HASH_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[CRP]$")
+
+
+def _validate_recipient_hash(value: str, *, field: str = "recipient_hash") -> str:
+    """USASpending recipient IDs look like '7fe0d08f-685f-...-R' (UUID + -C/-R/-P)."""
+    if not value or not value.strip():
+        raise ValueError(f"{field} cannot be empty.")
+    s = value.strip()
+    if not _RECIPIENT_HASH_RE.match(s):
+        raise ValueError(
+            f"{field}={value!r} is not a valid recipient hash. "
+            f"Expected UUID format with -C/-R/-P suffix (e.g. "
+            f"'7fe0d08f-685f-a9cc-f9f6-f9e6c6c20e22-R'). Use search_recipients() "
+            f"or autocomplete_recipient() to find the correct hash."
+        )
+    return s
+
+
+@mcp.tool(annotations={"title": "Get Recipient Profile", "readOnlyHint": True, "destructiveHint": False})
+async def get_recipient_profile(
+    recipient_hash: str,
+    year: str | None = None,
+) -> dict[str, Any]:
+    """Get full profile for a recipient by their USASpending hash.
+
+    Returns recipient details: name, UEI, DUNS, business categories, location,
+    parent (if any), and lifetime award totals. The hash is the 'id' field
+    returned by search_recipients() or autocomplete_recipient().
+
+    year: optional 'all' or a fiscal year like '2026'. Default is 'latest'.
+    """
+    recipient_hash = _validate_recipient_hash(recipient_hash)
+    params = {}
+    if year:
+        params["year"] = year.strip()
+    return await _get(f"/api/v2/recipient/{recipient_hash}/", params=params)
+
+
+@mcp.tool(annotations={"title": "Get Recipient Children", "readOnlyHint": True, "destructiveHint": False})
+async def get_recipient_children(
+    recipient_hash: str,
+    year: str | None = None,
+) -> dict[str, Any]:
+    """Get the child recipients (subsidiaries) of a parent recipient hash.
+
+    Pass a recipient hash with -P (parent) suffix to retrieve subsidiary
+    recipients. The endpoint returns a list of -C suffixed hashes representing
+    children. For -R (regular, no parent) recipients this returns an empty
+    list or 4xx.
+
+    Useful for mapping corporate structures (e.g. Lockheed Martin -P -> all
+    its subsidiaries -C).
+    """
+    recipient_hash = _validate_recipient_hash(recipient_hash)
+    params = {}
+    if year:
+        params["year"] = year.strip()
+    return await _get(f"/api/v2/recipient/children/{recipient_hash}/", params=params)
+
+
+@mcp.tool(annotations={"title": "Autocomplete Recipient", "readOnlyHint": True, "destructiveHint": False})
+async def autocomplete_recipient(
+    search_text: str,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find recipient hashes by partial name or UEI/DUNS.
+
+    Returns matching recipients with their hash IDs and metadata. Use the hash
+    from results in get_recipient_profile() or get_recipient_children().
+    """
+    limit = _clamp_limit(limit, cap=500)
+    search_text = _validate_no_control_chars(search_text, field="search_text") or ""
+    if not search_text.strip():
+        raise ValueError("search_text cannot be empty.")
+    payload = {"search_text": search_text.strip(), "limit": limit}
+    return await _post("/api/v2/autocomplete/recipient/", payload)
+
+
+@mcp.tool(annotations={"title": "List States", "readOnlyHint": True, "destructiveHint": False})
+async def list_states() -> dict[str, Any]:
+    """List all states with their FIPS codes and award totals.
+
+    Returns the full list of US states/territories with FIPS codes you can
+    pass to get_state_profile().
+
+    The /recipient/state/ endpoint returns a JSON array (not an object). We
+    wrap it in {"results": [...]} to keep the tool return type consistent
+    with every other endpoint in this MCP.
+    """
+    try:
+        r = await _get_client().get("/api/v2/recipient/state/")
+        r.raise_for_status()
+        data = r.json()
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(_format_http_error(e)) from e
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Network error calling USASpending: {e}") from e
+    if isinstance(data, list):
+        return {"results": data, "total": len(data)}
+    if isinstance(data, dict):
+        return data
+    raise RuntimeError(
+        f"USASpending /recipient/state/ returned an unexpected "
+        f"{type(data).__name__} (expected list or dict)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Agency depth
+# ---------------------------------------------------------------------------
+
+def _validate_toptier_code(code: str, *, field: str = "toptier_code") -> str:
+    """Toptier agency codes are 3-4 numeric digits (e.g. '097' for DoD)."""
+    if not code or not code.strip():
+        raise ValueError(f"{field} cannot be empty.")
+    s = code.strip()
+    if not re.match(r"^\d{3,4}$", s):
+        raise ValueError(
+            f"{field}={code!r} must be a 3-4 digit numeric toptier agency code "
+            f"(e.g. '097' for DoD, '075' for HHS). Use list_toptier_agencies() "
+            f"to find the right code."
+        )
+    return s
+
+
+def _validate_fy(fy: int | str | None, *, field: str = "fiscal_year") -> str | None:
+    if fy is None:
+        return None
+    try:
+        fy_int = int(str(fy).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be an int year like 2026. Got {fy!r}.") from exc
+    if fy_int < 2017 or fy_int > _current_fiscal_year() + 1:
+        raise ValueError(
+            f"{field}={fy_int} out of range. USASpending agency profile data "
+            f"covers FY2017 through FY{_current_fiscal_year()}."
+        )
+    return str(fy_int)
+
+
+@mcp.tool(annotations={"title": "Get Agency Budgetary Resources", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_budgetary_resources(toptier_code: str) -> dict[str, Any]:
+    """Get an agency's budgetary resources by fiscal year.
+
+    Returns total budgetary resources, obligations, outlays, and discretionary
+    vs mandatory breakdown for each fiscal year on file.
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    return await _get(f"/api/v2/agency/{toptier_code}/budgetary_resources/")
+
+
+@mcp.tool(annotations={"title": "Get Agency Sub-Agencies", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_sub_agencies(
+    toptier_code: str,
+    fiscal_year: int | str | None = None,
+    page: int = 1,
+    limit: int = 25,
+    order: Literal["asc", "desc"] = "desc",
+    sort: Literal["name", "total_obligations", "total_outlays", "transaction_count", "new_award_count"] = "total_obligations",
+) -> dict[str, Any]:
+    """List the subordinate (subtier) organizations of a toptier agency.
+
+    Returns each sub-agency with its obligations, outlays, transaction count,
+    and new-award count for the given fiscal year. Useful for finding the
+    canonical subtier name to pass into search_awards() awarding_subagency.
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    fy = _validate_fy(fiscal_year)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=100)
+    params: dict[str, Any] = {"page": str(page), "limit": str(limit), "order": order, "sort": sort}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(f"/api/v2/agency/{toptier_code}/sub_agency/", params=params)
+
+
+@mcp.tool(annotations={"title": "Get Agency Federal Accounts", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_federal_accounts(
+    toptier_code: str,
+    fiscal_year: int | str | None = None,
+    page: int = 1,
+    limit: int = 25,
+    order: Literal["asc", "desc"] = "desc",
+    sort: Literal["name", "obligated_amount", "gross_outlay_amount"] = "obligated_amount",
+) -> dict[str, Any]:
+    """List the Treasury Account Symbols (federal accounts) used by an agency.
+
+    Returns each federal account with its obligated amount and gross outlay
+    for the given fiscal year. Useful for understanding how an agency's
+    money flows through Treasury.
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    fy = _validate_fy(fiscal_year)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=100)
+    params: dict[str, Any] = {"page": str(page), "limit": str(limit), "order": order, "sort": sort}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(f"/api/v2/agency/{toptier_code}/federal_account/", params=params)
+
+
+@mcp.tool(annotations={"title": "Get Agency Object Classes", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_object_classes(
+    toptier_code: str,
+    fiscal_year: int | str | None = None,
+    page: int = 1,
+    limit: int = 25,
+    order: Literal["asc", "desc"] = "desc",
+    sort: Literal["name", "obligated_amount", "gross_outlay_amount"] = "obligated_amount",
+) -> dict[str, Any]:
+    """List the object class breakdown (what an agency spends money on).
+
+    Object classes are OMB categories: Personnel Compensation, Travel,
+    Contractual Services, Equipment, Grants, etc. Useful for understanding
+    what types of expenditures an agency makes.
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    fy = _validate_fy(fiscal_year)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=100)
+    params: dict[str, Any] = {"page": str(page), "limit": str(limit), "order": order, "sort": sort}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(f"/api/v2/agency/{toptier_code}/object_class/", params=params)
+
+
+@mcp.tool(annotations={"title": "Get Agency Program Activities", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_program_activities(
+    toptier_code: str,
+    fiscal_year: int | str | None = None,
+    page: int = 1,
+    limit: int = 25,
+    order: Literal["asc", "desc"] = "desc",
+    sort: Literal["name", "obligated_amount", "gross_outlay_amount"] = "obligated_amount",
+) -> dict[str, Any]:
+    """List the program activities (specific programs) within an agency.
+
+    Program activities are the specific named programs that obligate funds
+    (e.g., 'Cybersecurity and Infrastructure Security Agency'). Useful for
+    pinpointing which program funds a specific activity.
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    fy = _validate_fy(fiscal_year)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=100)
+    params: dict[str, Any] = {"page": str(page), "limit": str(limit), "order": order, "sort": sort}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(f"/api/v2/agency/{toptier_code}/program_activity/", params=params)
+
+
+@mcp.tool(annotations={"title": "Get Agency Obligations by Award Category", "readOnlyHint": True, "destructiveHint": False})
+async def get_agency_obligations_by_award_category(
+    toptier_code: str,
+    fiscal_year: int | str | None = None,
+) -> dict[str, Any]:
+    """Get an agency's obligation breakdown by award category.
+
+    Returns total obligated dollars split by category: contracts, IDVs, grants,
+    loans, direct payments, other. Quick way to see what mix of award types
+    an agency uses (heavy contractor agency vs grant-issuing agency vs mixed).
+    """
+    toptier_code = _validate_toptier_code(toptier_code)
+    fy = _validate_fy(fiscal_year)
+    params: dict[str, Any] = {}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(
+        f"/api/v2/agency/{toptier_code}/obligations_by_award_category/", params=params,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Award depth
+# ---------------------------------------------------------------------------
+
+def _validate_generated_award_id(award_id: str, *, field: str = "award_id") -> str:
+    """Generated award IDs look like 'CONT_AWD_W912QR25C0022_9700_...' or
+    'CONT_IDV_GS00Q14OADU131_4732_...' or 'ASST_NON_FA86502125028_097'.
+    """
+    if not award_id or not award_id.strip():
+        raise ValueError(f"{field} cannot be empty.")
+    award_id = _validate_no_control_chars(award_id.strip(), field=field) or ""
+    if not award_id.startswith(("CONT_AWD_", "CONT_IDV_", "ASST_NON_", "ASST_AGG_")):
+        raise ValueError(
+            f"{field}={award_id!r} is not a valid generated award id. "
+            f"Expected prefix: CONT_AWD_, CONT_IDV_, ASST_NON_, or ASST_AGG_. "
+            f"Find the right id from search_awards() results."
+        )
+    return award_id
+
+
+@mcp.tool(annotations={"title": "Get Award Funding Rollup", "readOnlyHint": True, "destructiveHint": False})
+async def get_award_funding_rollup(award_id: str) -> dict[str, Any]:
+    """Get a rollup of an award's funding totals.
+
+    Returns total transaction obligated amount, awarding agency count,
+    funding agency count, and federal account count for a single award.
+    Useful for a one-line summary of an award's funding picture.
+    """
+    award_id = _validate_generated_award_id(award_id)
+    return await _post("/api/v2/awards/funding_rollup/", {"award_id": award_id})
+
+
+@mcp.tool(annotations={"title": "Get Award Subaward Count", "readOnlyHint": True, "destructiveHint": False})
+async def get_award_subaward_count(award_id: str) -> dict[str, Any]:
+    """Count of subawards (FFATA subcontracts/subawards) reported on an award."""
+    award_id = _validate_generated_award_id(award_id)
+    return await _get(f"/api/v2/awards/count/subaward/{award_id}/")
+
+
+@mcp.tool(annotations={"title": "Get Award Federal Account Count", "readOnlyHint": True, "destructiveHint": False})
+async def get_award_federal_account_count(award_id: str) -> dict[str, Any]:
+    """Count of distinct federal accounts (TAS) funding an award."""
+    award_id = _validate_generated_award_id(award_id)
+    return await _get(f"/api/v2/awards/count/federal_account/{award_id}/")
+
+
+@mcp.tool(annotations={"title": "Get Award Transaction Count", "readOnlyHint": True, "destructiveHint": False})
+async def get_award_transaction_count(award_id: str) -> dict[str, Any]:
+    """Count of transactions (modifications) on an award."""
+    award_id = _validate_generated_award_id(award_id)
+    return await _get(f"/api/v2/awards/count/transaction/{award_id}/")
+
+
+@mcp.tool(annotations={"title": "Awards Last Updated", "readOnlyHint": True, "destructiveHint": False})
+async def awards_last_updated() -> dict[str, Any]:
+    """Get the timestamp of the last USASpending award data refresh.
+
+    Use this to determine data freshness when comparing to other sources
+    (SAM.gov Contract Awards API for example).
+    """
+    return await _get("/api/v2/awards/last_updated/")
+
+
+# ---------------------------------------------------------------------------
+# Search depth (transactions, geography, timeline)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"title": "Spending by Transaction", "readOnlyHint": True, "destructiveHint": False})
+async def spending_by_transaction(
+    award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other"] = "contracts",
+    keywords: list[str] | None = None,
+    awarding_agency: str | None = None,
+    funding_agency: str | None = None,
+    recipient_uei: str | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+    set_aside_type_codes: list[str | int] | None = None,
+    time_period_start: str | None = None,
+    time_period_end: str | None = None,
+    award_amount_min: float | None = None,
+    award_amount_max: float | None = None,
+    sort: str = "Action Date",
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """Search at the transaction (modification) level.
+
+    Unlike search_awards which returns one row per award, this returns one
+    row per transaction (initial action plus every modification). Useful for
+    tracking obligation events over time, ceiling adjustments, deobligations,
+    and admin mods.
+
+    Returns standard transaction fields: Action Date, Mod, Award ID,
+    Action Type, Awarding Agency, Recipient Name.
+    """
+    codes = _resolve_award_type(award_type)
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    filters = _build_filters(
+        keywords=keywords,
+        award_type_codes=codes,
+        awarding_agency=awarding_agency,
+        funding_agency=funding_agency,
+        recipient_uei=recipient_uei,
+        naics_codes=naics_codes,
+        psc_codes=psc_codes,
+        set_aside_type_codes=set_aside_type_codes,
+        time_period_start=time_period_start,
+        time_period_end=time_period_end,
+        award_amount_min=award_amount_min,
+        award_amount_max=award_amount_max,
+    )
+    fields = [
+        "Action Date", "Mod", "Award ID", "Action Type",
+        "Awarding Agency", "Recipient Name", "Transaction Amount",
+        "Transaction Description", "internal_id", "generated_internal_id",
+    ]
+    payload = {
+        "filters": filters, "fields": fields,
+        "sort": sort, "order": order, "limit": limit, "page": page,
+    }
+    return await _post("/api/v2/search/spending_by_transaction/", payload)
+
+
+@mcp.tool(annotations={"title": "Spending by Geography", "readOnlyHint": True, "destructiveHint": False})
+async def spending_by_geography(
+    scope: Literal["recipient_location", "place_of_performance"] = "place_of_performance",
+    geo_layer: Literal["state", "county", "district"] = "state",
+    award_type: Literal["contracts", "idvs", "grants", "loans", "direct_payments", "other", "all"] = "all",
+    time_period_start: str | None = None,
+    time_period_end: str | None = None,
+    awarding_agency: str | None = None,
+    funding_agency: str | None = None,
+    naics_codes: list[str | int] | None = None,
+    psc_codes: list[str | int] | None = None,
+) -> dict[str, Any]:
+    """Geographic breakdown of spending.
+
+    scope: 'recipient_location' (where the recipient is) or 'place_of_performance'
+    (where the work happens).
+    geo_layer: 'state', 'county', or 'district'.
+    """
+    codes = None if award_type == "all" else _resolve_award_type(award_type)
+    filters = _build_filters(
+        award_type_codes=codes,
+        awarding_agency=awarding_agency,
+        funding_agency=funding_agency,
+        naics_codes=naics_codes,
+        psc_codes=psc_codes,
+        time_period_start=time_period_start,
+        time_period_end=time_period_end,
+    )
+    payload = {"filters": filters, "scope": scope, "geo_layer": geo_layer}
+    return await _post("/api/v2/search/spending_by_geography/", payload)
+
+
+@mcp.tool(annotations={"title": "New Awards Over Time", "readOnlyHint": True, "destructiveHint": False})
+async def new_awards_over_time(
+    recipient_id: str,
+    group: Literal["fiscal_year", "quarter", "month"] = "month",
+    time_period_start: str | None = None,
+    time_period_end: str | None = None,
+) -> dict[str, Any]:
+    """Pipeline trend of new awards to a recipient over time.
+
+    REQUIRES recipient_id (the recipient hash with -P suffix for parent-level
+    rollup, or -R for a single recipient). Returns counts of new awards
+    grouped by month, quarter, or fiscal year.
+
+    The endpoint will reject calls without recipient_id with HTTP 422.
+    """
+    recipient_id = _validate_recipient_hash(recipient_id, field="recipient_id")
+    filters: dict[str, Any] = {"recipient_id": recipient_id}
+    if time_period_start or time_period_end:
+        start = _validate_date(time_period_start, "time_period_start") if time_period_start else _EARLIEST_SEARCH_DATE
+        end = _validate_date(time_period_end, "time_period_end") if time_period_end else "2099-09-30"
+        filters["time_period"] = [{"start_date": start, "end_date": end}]
+    payload = {"group": group, "filters": filters}
+    return await _post("/api/v2/search/new_awards_over_time/", payload)
+
+
+# ---------------------------------------------------------------------------
+# IDV depth
+# ---------------------------------------------------------------------------
+
+def _validate_idv_award_id(award_id: str, *, field: str = "award_id") -> str:
+    """IDV-specific endpoints require CONT_IDV_ prefix."""
+    award_id = _validate_generated_award_id(award_id, field=field)
+    if not award_id.startswith("CONT_IDV_"):
+        raise ValueError(
+            f"{field}={award_id!r} is not an IDV award id (CONT_IDV_*). "
+            f"This endpoint is IDV-only. For non-IDV contracts use the awards "
+            f"endpoints instead."
+        )
+    return award_id
+
+
+@mcp.tool(annotations={"title": "Get IDV Amounts", "readOnlyHint": True, "destructiveHint": False})
+async def get_idv_amounts(award_id: str) -> dict[str, Any]:
+    """Top-line amounts for an Indefinite Delivery Vehicle (IDV).
+
+    Returns child IDV count, child award count, child award total obligation,
+    and base/option values rolled up across all task/delivery orders under
+    the IDV. Pass a CONT_IDV_* generated_internal_id.
+    """
+    award_id = _validate_idv_award_id(award_id)
+    return await _get(f"/api/v2/idvs/amounts/{award_id}/")
+
+
+@mcp.tool(annotations={"title": "Get IDV Funding", "readOnlyHint": True, "destructiveHint": False})
+async def get_idv_funding(
+    award_id: str,
+    sort: Literal["reporting_fiscal_date", "transaction_obligated_amount", "piid"] = "reporting_fiscal_date",
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """List the funding records (File C) for an IDV's child orders."""
+    award_id = _validate_idv_award_id(award_id)
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    payload = {
+        "award_id": award_id, "sort": sort, "order": order,
+        "limit": limit, "page": page,
+    }
+    return await _post("/api/v2/idvs/funding/", payload)
+
+
+@mcp.tool(annotations={"title": "Get IDV Funding Rollup", "readOnlyHint": True, "destructiveHint": False})
+async def get_idv_funding_rollup(award_id: str) -> dict[str, Any]:
+    """Funding rollup totals for an IDV (single dict, not paginated)."""
+    award_id = _validate_idv_award_id(award_id)
+    return await _post("/api/v2/idvs/funding_rollup/", {"award_id": award_id})
+
+
+@mcp.tool(annotations={"title": "Get IDV Activity", "readOnlyHint": True, "destructiveHint": False})
+async def get_idv_activity(
+    award_id: str,
+    sort: Literal["period_of_performance_start_date", "obligated_amount"] = "period_of_performance_start_date",
+    order: Literal["asc", "desc"] = "desc",
+    limit: int = 25,
+    page: int = 1,
+) -> dict[str, Any]:
+    """List child task/delivery orders awarded under an IDV."""
+    award_id = _validate_idv_award_id(award_id)
+    limit = _clamp_limit(limit, cap=100)
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    payload = {
+        "award_id": award_id, "sort": sort, "order": order,
+        "limit": limit, "page": page,
+    }
+    return await _post("/api/v2/idvs/activity/", payload)
+
+
+# ---------------------------------------------------------------------------
+# Autocomplete helpers
+# ---------------------------------------------------------------------------
+
+def _autocomplete_payload(search_text: str, limit: int) -> dict[str, Any]:
+    search_text = _validate_no_control_chars(search_text, field="search_text") or ""
+    if not search_text.strip():
+        raise ValueError("search_text cannot be empty.")
+    return {"search_text": search_text.strip(), "limit": _clamp_limit(limit, cap=500)}
+
+
+@mcp.tool(annotations={"title": "Autocomplete Awarding Agency", "readOnlyHint": True, "destructiveHint": False})
+async def autocomplete_awarding_agency(search_text: str, limit: int = 10) -> dict[str, Any]:
+    """Find awarding agency names by partial match.
+
+    USASpending search filters require the EXACT awarding agency name
+    (slugs return zero). Use this to resolve a partial name to the canonical
+    one before passing to search_awards() awarding_agency parameter.
+    """
+    return await _post("/api/v2/autocomplete/awarding_agency/", _autocomplete_payload(search_text, limit))
+
+
+@mcp.tool(annotations={"title": "Autocomplete Funding Agency", "readOnlyHint": True, "destructiveHint": False})
+async def autocomplete_funding_agency(search_text: str, limit: int = 10) -> dict[str, Any]:
+    """Find funding agency names by partial match (companion to awarding agency)."""
+    return await _post("/api/v2/autocomplete/funding_agency/", _autocomplete_payload(search_text, limit))
+
+
+@mcp.tool(annotations={"title": "Autocomplete CFDA", "readOnlyHint": True, "destructiveHint": False})
+async def autocomplete_cfda(search_text: str, limit: int = 10) -> dict[str, Any]:
+    """Find CFDA (Catalog of Federal Domestic Assistance) program numbers
+    by partial title or program number. CFDA codes are used in grants."""
+    return await _post("/api/v2/autocomplete/cfda/", _autocomplete_payload(search_text, limit))
+
+
+@mcp.tool(annotations={"title": "Autocomplete Glossary", "readOnlyHint": True, "destructiveHint": False})
+async def autocomplete_glossary(search_text: str, limit: int = 10) -> dict[str, Any]:
+    """Find glossary terms (acquisition + spending vocabulary) by partial match."""
+    return await _post("/api/v2/autocomplete/glossary/", _autocomplete_payload(search_text, limit))
+
+
+# ---------------------------------------------------------------------------
+# Reference data
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"title": "Get Award Types Reference", "readOnlyHint": True, "destructiveHint": False})
+async def get_award_types_reference() -> dict[str, Any]:
+    """Return the full mapping of award type codes to descriptions.
+
+    Returns the canonical reference: contracts (A=BPA Call, B=Purchase Order,
+    C=Delivery Order, D=Definitive Contract), IDVs, grants, loans, etc.
+    Authoritative source if you're unsure what a code letter means.
+    """
+    return await _get("/api/v2/references/award_types/")
+
+
+@mcp.tool(annotations={"title": "Get DEF Codes Reference", "readOnlyHint": True, "destructiveHint": False})
+async def get_def_codes_reference() -> dict[str, Any]:
+    """Return all Disaster Emergency Fund (DEFC) codes with public laws.
+
+    DEFCs are used to filter awards funded by specific supplemental
+    appropriations (COVID-19, IIJA, IRA, etc.).
+    """
+    return await _get("/api/v2/references/def_codes/")
+
+
+@mcp.tool(annotations={"title": "Get Glossary", "readOnlyHint": True, "destructiveHint": False})
+async def get_glossary(
+    page: int = 1,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Get the full USASpending glossary of acquisition + spending terms."""
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=500)
+    return await _get("/api/v2/references/glossary/", params={"page": str(page), "limit": str(limit)})
+
+
+@mcp.tool(annotations={"title": "Get Submission Periods", "readOnlyHint": True, "destructiveHint": False})
+async def get_submission_periods() -> dict[str, Any]:
+    """Return the list of agency submission periods (when each agency last
+    submitted data for each fiscal period). Useful for understanding which
+    quarters of which fiscal years have full data coverage."""
+    return await _get("/api/v2/references/submission_periods/")
+
+
+# ---------------------------------------------------------------------------
+# Federal accounts
+# ---------------------------------------------------------------------------
+
+_TAS_RE = re.compile(r"^[\w\-]+$")
+
+
+def _validate_tas(tas: str, *, field: str = "account_code") -> str:
+    if not tas or not tas.strip():
+        raise ValueError(f"{field} cannot be empty.")
+    s = tas.strip()
+    if not _TAS_RE.match(s):
+        raise ValueError(
+            f"{field}={tas!r} contains invalid characters. Treasury account "
+            f"symbols look like '097-0100' or similar alphanumeric/hyphen."
+        )
+    return s
+
+
+@mcp.tool(annotations={"title": "List Federal Accounts", "readOnlyHint": True, "destructiveHint": False})
+async def list_federal_accounts(
+    keyword: str | None = None,
+    fiscal_year: int | str | None = None,
+    sort: dict[str, str] | None = None,
+    page: int = 1,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """List Treasury federal accounts (TAS) with budgetary resources.
+
+    keyword filters by account name or AID. fiscal_year defaults to current FY.
+    sort is a dict like {'field':'budgetary_resources','direction':'desc'}.
+    """
+    if page < 1:
+        raise ValueError(f"page must be >= 1. Got {page}.")
+    limit = _clamp_limit(limit, cap=100)
+    keyword = _validate_no_control_chars(keyword, field="keyword")
+    fy = _validate_fy(fiscal_year)
+    payload: dict[str, Any] = {"page": page, "limit": limit}
+    if keyword and keyword.strip():
+        payload["keyword"] = keyword.strip()
+    if fy:
+        payload["filters"] = {"fy": fy}
+    if sort:
+        payload["sort"] = sort
+    return await _post("/api/v2/federal_accounts/", payload)
+
+
+@mcp.tool(annotations={"title": "Get Federal Account Detail", "readOnlyHint": True, "destructiveHint": False})
+async def get_federal_account_detail(account_code: str) -> dict[str, Any]:
+    """Get an individual federal account's metadata + budgetary resources."""
+    account_code = _validate_tas(account_code)
+    return await _get(f"/api/v2/federal_accounts/{account_code}/")
+
+
+@mcp.tool(annotations={"title": "Get Federal Account Object Classes", "readOnlyHint": True, "destructiveHint": False})
+async def get_federal_account_object_classes(account_code: str) -> dict[str, Any]:
+    """Get the object class breakdown of obligations for a federal account."""
+    account_code = _validate_tas(account_code)
+    return await _get(f"/api/v2/federal_accounts/{account_code}/object_classes/total/")
+
+
+@mcp.tool(annotations={"title": "Get Federal Account Program Activities", "readOnlyHint": True, "destructiveHint": False})
+async def get_federal_account_program_activities(
+    account_code: str,
+    fiscal_year: int | str | None = None,
+) -> dict[str, Any]:
+    """Get the program activities funded under a federal account."""
+    account_code = _validate_tas(account_code)
+    fy = _validate_fy(fiscal_year)
+    params: dict[str, Any] = {}
+    if fy:
+        params["fiscal_year"] = fy
+    return await _get(
+        f"/api/v2/federal_accounts/{account_code}/program_activities/", params=params,
+    )
+
+
+@mcp.tool(annotations={"title": "Get Federal Account Fiscal Year Snapshot", "readOnlyHint": True, "destructiveHint": False})
+async def get_federal_account_fy_snapshot(
+    account_code: str,
+    fiscal_year: int | str | None = None,
+) -> dict[str, Any]:
+    """Get a single-fiscal-year snapshot of a federal account's resources."""
+    account_code = _validate_tas(account_code)
+    fy = _validate_fy(fiscal_year)
+    if fy:
+        return await _get(f"/api/v2/federal_accounts/{account_code}/fiscal_year_snapshot/{fy}/")
+    return await _get(f"/api/v2/federal_accounts/{account_code}/fiscal_year_snapshot/")
+
+
 # ---------------------------------------------------------------------------
 # Strict parameter validation
 # ---------------------------------------------------------------------------

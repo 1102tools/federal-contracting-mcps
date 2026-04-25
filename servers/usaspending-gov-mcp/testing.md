@@ -2,22 +2,59 @@
 
 ## Executive Summary
 
-This Model Context Protocol server exposes the USASpending.gov REST API as 17 callable tools for federal contract and award research. It was hardened across five release cycles and five audit rounds, including a deep live audit against the production USASpending.gov API and a round 5 density expansion. Testing surfaced 15 priority issues plus more than 28 additional integration bugs, all of which were fixed before the current release. Round 5 added 415 new parameterized tests organized into 19 distinct failure-mode buckets, lifting density to 28.1 tests per tool, in the same tier as sam-gov-mcp (29.9) and gsa-perdiem-mcp (28.7). The MCP ships with 477 regression tests (467 offline plus 10 live-gated).
+This Model Context Protocol server exposes the USASpending.gov REST API as 55 callable tools for federal contract, award, subaward, recipient, agency, and federal account research. It was hardened across nine audit rounds. v0.3 (round 9) tripled the API surface from 17 to 55 tools, adding FFATA subawards, recipient profile/children, agency depth (sub-agencies, federal accounts, object classes, program activities, obligations by award category), award detail rollups, transaction-level and geographic search, IDV depth, autocomplete helpers, reference data, and Treasury federal accounts. Round 9 added 243 tests (167 offline, 76 live), fixing 1 P1 response-shape bug (list_states returned a JSON array, breaking the dict-only response invariant). The MCP ships with 1,050+ regression tests covering every surface twice (offline shape + live).
 
 | Metric | Value |
 |---|---|
-| MCP tools exposed | 17 |
-| Total regression tests | 807 (526 offline, 281 live-gated) |
-| Tests per tool | 47.5 |
-| Audit rounds completed | 8 (2 live audits + 1 Hypothesis property test round) |
+| MCP tools exposed | 55 |
+| Total regression tests | 1,050+ (770+ offline, 280+ live-gated) |
+| Tests per tool | 19+ |
+| Audit rounds completed | 9 (rounds 1-8 + v0.3 expansion with live audit) |
 | Initial integration issues (round 1) | 28+ |
-| P1 silent-wrong-data bugs found and fixed | 10 |
+| P1 silent-wrong-data bugs found and fixed | 11 |
 | P2 validation gaps found and fixed | 7 |
 | Round 7 deep live audit findings | 0 |
-| Round 8 Hypothesis property tests findings | 0 (validators clean across ~25,000 random probes) |
-| Release cycles | 9 (v0.1.2 through v0.2.10) |
-| Current release | 0.2.10 |
+| Round 8 Hypothesis property tests findings | 0 |
+| Round 9 (v0.3) live audit findings | 1 (list_states JSON-array response shape) |
+| Release cycles | 10 (v0.1.2 through v0.3.0) |
+| Current release | 0.3.0 |
 | PyPI status | Published as `usaspending-gov-mcp`, auto-publishes via Trusted Publisher on tag push |
+
+## Round 9 (v0.3.0): API surface expansion
+
+Tripled the tool count from 17 to 55. Added 38 new tools across nine endpoint groups: subawards (FFATA), recipient depth, agency depth, award detail rollups, transaction/geography/timeline search, IDV depth, autocomplete helpers, reference data, federal accounts.
+
+### Per-group test breakdown (243 new tests in v0.3)
+
+| Group | Tools | Validation | Mock | Live |
+|---|---|---|---|---|
+| Subawards | 2 | 9 | 4 | 5 |
+| Recipients | 5 | 14 | 6 | 8 |
+| Agency depth | 6 | 26 | 7 | 14 |
+| Award detail | 5 | 12 | 6 | 5 |
+| Search depth | 3 | 11 | 3 | 5 |
+| IDV depth | 4 | 18 | 4 | 4 |
+| Autocomplete | 4 | 16 | 4 | 11 |
+| Reference data | 4 | 3 | 4 | 4 |
+| Federal accounts | 5 | 12 | 8 | 3 |
+| Stress / connection reuse | — | — | — | 13 |
+| **v0.3 totals** | **38** | **121** | **46** | **76** |
+
+### P1 bug found in live audit
+
+**`list_states` returned a JSON array but the MCP's `_ensure_dict_response` helper rejected non-dict responses with a clear error.** The endpoint at `/api/v2/recipient/state/` is the only USASpending endpoint in the surface that returns a top-level array. Fixed by special-casing the tool to wrap the array in `{"results": [...], "total": N}`. Without live testing this would have shipped as a guaranteed runtime error every time someone called the tool.
+
+### Endpoint quirks baked in
+
+- `new_awards_over_time` REQUIRES `recipient_id` in filters; the API returns HTTP 422 if omitted. Validator rejects calls without it pre-network with a clearer error.
+- Recipient hashes are UUIDs with `-C` (children), `-R` (regular), or `-P` (parent) suffix. Bare UEIs are not valid; `_validate_recipient_hash` rejects them before network.
+- Generated award IDs use specific prefixes: `CONT_AWD_` (contract), `CONT_IDV_` (IDV), `ASST_NON_` (assistance non-aggregated), `ASST_AGG_` (assistance aggregated). IDV-specific tools further require `CONT_IDV_` prefix.
+- Treasury account symbols are alphanumeric/hyphen (e.g. `097-0100`). Validator rejects special characters.
+- Toptier agency codes are 3-4 numeric digits (e.g. `097` for DoD, `075` for HHS). Validator rejects DoD/HHS strings or shorter codes.
+
+### Live tests cover
+
+Department lookups for DoD (097), HHS (075), Treasury (020); recipient-hash chains using real hashes pulled from search results; IDV chain (search → amounts → funding → activity → funding_rollup); pagination consistency for subawards, recipients, sub-agencies; concurrent calls across mixed endpoints (asyncio.gather); autocomplete sanity for awarding/funding agencies, CFDA, glossary, recipient (Lockheed, Boeing); reference data shape (award_types canonical mapping, def_codes list non-empty, glossary paginated); federal account chain (list → detail).
 
 ## What Was Tested
 

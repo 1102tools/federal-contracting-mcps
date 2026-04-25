@@ -10,7 +10,7 @@ All source lives under `servers/<name>/`. Each server is self-contained: manifes
 
 **Procurement data**
 - [sam-gov-mcp](servers/sam-gov-mcp) — SAM.gov entity registration, exclusions, opportunities, contract awards (FPDS replacement), federal hierarchy, FFATA subawards
-- [usaspending-gov-mcp](servers/usaspending-gov-mcp) — federal contract and award data, PIIDs, vendor history, agency spending
+- [usaspending-gov-mcp](servers/usaspending-gov-mcp) — federal contract, award, FFATA subaward, recipient, agency, and Treasury federal account data
 - [gsa-calc-mcp](servers/gsa-calc-mcp) — GSA CALC+ awarded NTE hourly rates from MAS contracts (230K+ records)
 - [bls-oews-mcp](servers/bls-oews-mcp) — BLS OEWS market wage data across ~830 occupations and 530+ metros
 - [gsa-perdiem-mcp](servers/gsa-perdiem-mcp) — federal travel lodging and M&IE rates for all CONUS

@@ -1,41 +1,78 @@
 # usaspending-gov-mcp
 
-MCP server for the USASpending.gov federal contract and award data API.
+MCP server for the USASpending.gov federal contract, award, subaward, recipient, agency, and federal account API.
 
 No API key required. Works with any MCP-compatible client (Claude Desktop, Claude Code, Cursor, Cline, Continue, Zed, etc.).
 
-*Tested and hardened through four rounds of integration testing against the live USASpending.gov API. 807 regression tests covering 10 P1 silent-wrong-data bugs and 5 P2 validation gaps fixed. See [TESTING.md](TESTING.md) for the full testing record.*
+*Tested and hardened through nine rounds of integration testing against the live USASpending.gov API. v0.3 added 38 new tools and 243 tests across the new endpoints (76 live). See [testing.md](testing.md) for the full testing record.*
 
 ## What it does
 
-Exposes the USASpending.gov REST API as 17 MCP tools covering:
+Exposes the USASpending.gov REST API as 55 MCP tools covering:
 
 **Search and aggregation**
 - `search_awards` - Primary search for contracts, IDVs, grants, loans, direct payments
 - `get_award_count` - Dimensional counts across award categories
 - `spending_over_time` - Time series aggregation (fiscal year, quarter, month)
 - `spending_by_category` - Top N breakdowns by agency, vendor, NAICS, PSC, state, etc.
+- `spending_by_transaction` - Modification-level transaction search
+- `spending_by_geography` - State, county, or congressional district breakdown
+- `new_awards_over_time` - Pipeline trend for a recipient
 
 **Award detail**
 - `get_award_detail` - Full record for a single award
 - `get_transactions` - Full modification history for an award
 - `get_award_funding` - File C funding data (Treasury account, object class, program activity)
+- `get_award_funding_rollup` - Single-line funding summary
+- `get_award_subaward_count`, `get_award_federal_account_count`, `get_award_transaction_count`
 - `get_idv_children` - Task/delivery orders under an IDV
+- `awards_last_updated` - Data freshness check
+
+**Subawards (FFATA)**
+- `search_subawards` - Subawards under a single prime
+- `spending_by_subaward_grouped` - Subaward search with full filter set
+
+**Recipients**
+- `search_recipients` - Search recipients by keyword
+- `get_recipient_profile` - Full recipient record
+- `get_recipient_children` - Subsidiaries of a parent recipient
+- `autocomplete_recipient` - Find recipient hashes by partial name
+- `list_states` - All states with FIPS codes
+
+**Agency depth**
+- `list_toptier_agencies`, `get_agency_overview`, `get_agency_awards`
+- `get_agency_budgetary_resources` - Budget resources by FY
+- `get_agency_sub_agencies` - Subordinate orgs with obligations
+- `get_agency_federal_accounts` - Funding sources (TAS)
+- `get_agency_object_classes` - Spending categories (OMB)
+- `get_agency_program_activities` - Program-level breakdown
+- `get_agency_obligations_by_award_category` - Contract vs grant mix
+
+**IDV depth**
+- `get_idv_amounts` - Top-line IDV rollup
+- `get_idv_funding`, `get_idv_funding_rollup` - File C for IDV
+- `get_idv_activity` - Child orders under an IDV
+
+**Federal accounts (Treasury)**
+- `list_federal_accounts` - Search TAS
+- `get_federal_account_detail`, `get_federal_account_object_classes`,
+  `get_federal_account_program_activities`, `get_federal_account_fy_snapshot`
+
+**Autocomplete**
+- `autocomplete_psc`, `autocomplete_naics`
+- `autocomplete_awarding_agency`, `autocomplete_funding_agency`
+- `autocomplete_cfda` (grants), `autocomplete_glossary`, `autocomplete_recipient`
+
+**Reference data**
+- `get_naics_details`, `get_psc_filter_tree`
+- `get_award_types_reference` - All award type codes (A=BPA Call etc.)
+- `get_def_codes_reference` - Disaster Emergency Fund codes (COVID, IIJA, IRA)
+- `get_glossary` - Acquisition/spending vocabulary
+- `get_submission_periods` - Agency reporting period coverage
+- `get_state_profile` - State-level spending profile
 
 **Workflow convenience**
 - `lookup_piid` - Auto-detects contract vs IDV and returns the matching award
-
-**Autocomplete**
-- `autocomplete_psc` - Product/Service Code lookup
-- `autocomplete_naics` - NAICS code lookup
-
-**Reference data**
-- `list_toptier_agencies` - All federal agencies
-- `get_agency_overview` - Agency summary by toptier code and fiscal year
-- `get_agency_awards` - Agency award totals by category
-- `get_naics_details` - NAICS code details (2-6 digit)
-- `get_psc_filter_tree` - PSC hierarchy, drillable
-- `get_state_profile` - State-level spending profile by FIPS code
 
 ## Installation
 

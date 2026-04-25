@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.3.0
+
+API surface expansion. Tool count goes from 17 to 55 (+38 new tools).
+Added FFATA subawards, recipient depth, agency depth, award detail
+rollups, transaction/geography/timeline search, IDV depth, autocomplete
+helpers, reference data, and Treasury federal accounts.
+
+### New tools (38)
+
+**Subawards (FFATA)**
+- `search_subawards` - Subawards under a single prime award
+- `spending_by_subaward_grouped` - Subaward search with full filter set
+
+**Recipient depth**
+- `search_recipients` - Search recipients by keyword
+- `get_recipient_profile` - Full recipient profile by hash
+- `get_recipient_children` - Subsidiaries of a parent recipient
+- `autocomplete_recipient` - Find recipient hashes by partial name
+- `list_states` - All states with FIPS codes and totals
+
+**Agency depth**
+- `get_agency_budgetary_resources` - Budget by FY
+- `get_agency_sub_agencies` - Subordinate orgs with obligations
+- `get_agency_federal_accounts` - Funding sources (TAS)
+- `get_agency_object_classes` - OMB spending categories
+- `get_agency_program_activities` - Program-level breakdown
+- `get_agency_obligations_by_award_category` - Contract vs grant mix
+
+**Award detail**
+- `get_award_funding_rollup` - Single-line funding summary
+- `get_award_subaward_count`, `get_award_federal_account_count`,
+  `get_award_transaction_count`
+- `awards_last_updated` - Data freshness
+
+**Search depth**
+- `spending_by_transaction` - Modification-level transaction search
+- `spending_by_geography` - State, county, district breakdown
+- `new_awards_over_time` - Pipeline trend for a recipient (requires recipient_id)
+
+**IDV depth**
+- `get_idv_amounts` - IDV top-line rollup
+- `get_idv_funding`, `get_idv_funding_rollup` - File C for IDV
+- `get_idv_activity` - Child orders under IDV
+
+**Autocomplete helpers**
+- `autocomplete_awarding_agency`, `autocomplete_funding_agency`
+- `autocomplete_cfda` (grants), `autocomplete_glossary`
+
+**Reference data**
+- `get_award_types_reference` - Award type code map (A=BPA Call etc.)
+- `get_def_codes_reference` - Disaster Emergency Fund codes (COVID, IIJA, IRA)
+- `get_glossary` - Acquisition/spending vocabulary
+- `get_submission_periods` - Agency reporting period coverage
+
+**Federal accounts (Treasury)**
+- `list_federal_accounts` - Search TAS
+- `get_federal_account_detail`, `get_federal_account_object_classes`,
+  `get_federal_account_program_activities`, `get_federal_account_fy_snapshot`
+
+### P1 bug found in live audit
+
+`list_states` returned a JSON array, but the MCP's response invariant
+required a dict. Wrapping the array in `{"results": [...], "total": N}`
+fixes the tool and matches the rest of the surface. Without live testing
+this would have been a guaranteed runtime error every call.
+
+### API surface notes baked in
+
+- `new_awards_over_time` requires `recipient_id` filter (API returns HTTP
+  422 otherwise). Validated pre-network with a clear error.
+- Recipient hashes are UUIDs with `-C/-R/-P` suffix; bare UEIs are not
+  valid. `_validate_recipient_hash` rejects them before network.
+- Generated award IDs use specific prefixes (`CONT_AWD_`, `CONT_IDV_`,
+  `ASST_NON_`, `ASST_AGG_`); IDV-specific tools require `CONT_IDV_`.
+- Treasury account symbols allow alphanumeric and hyphens.
+- Toptier agency codes are 3-4 numeric digits; alphabetic codes like
+  "DOD" are rejected.
+
+### Test counts
+
+- 167 offline tests (validation + mock + endpoint shape)
+- 76 live tests (10+ per major endpoint group, all confirmed against
+  production api.usaspending.gov)
+- 243 total new tests for v0.3
+- All tests pass; one originally-failing live stress test (deep pagination
+  on the recipients table) was retargeted to test connection reuse instead
+
 ## 0.2.10
 
 Round 8: Hypothesis-driven property test suite + bonus live tests. 69 new
